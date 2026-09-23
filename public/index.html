@@ -79,6 +79,13 @@
       </select>
       <label class="check-label"><input type="checkbox" id="set-wild" checked> Einsen sind Joker (zählen für jede Augenzahl)</label>
       <label class="check-label"><input type="checkbox" id="set-spot"> „Genau!“ erlaubt (exakte Anzahl: Würfel zurück)</label>
+      <label for="set-turn">Zeit pro Zug</label>
+      <select id="set-turn">
+        <option value="15">15 Sekunden</option>
+        <option value="30" selected>30 Sekunden</option>
+        <option value="60">60 Sekunden</option>
+        <option value="0">Ohne Zeitlimit</option>
+      </select>
     </div>
     <p id="lobby-settings-display" class="hint hidden"></p>
 
@@ -120,30 +127,39 @@
       <button id="btn-reset-view" class="chip" type="button" title="Blick zurücksetzen">🎯 Blick</button>
     </div>
 
+    <div id="turn-flash" class="turn-flash"></div>
     <div id="peek-hud" class="peek-hud hidden"></div>
     <div id="banner" class="banner hidden"></div>
   </div>
 
   <!-- Steuerung unten -->
   <div id="control-bar" class="control-bar">
+    <div id="turn-timer" class="turn-timer hidden"><i></i></div>
     <div id="status-line" class="status-line"></div>
     <div class="controls-row">
-      <button id="btn-peek" class="btn peek-btn" type="button" title="Leertaste halten oder auf den eigenen Becher klicken">🎲 <span class="lbl-long">Unter den Becher schauen</span><span class="lbl-short">Schauen</span></button>
-      <div id="bid-controls" class="bid-controls hidden">
-        <div class="qty-picker">
-          <button id="qty-minus" class="btn round" type="button">−</button>
-          <span id="qty-value" class="qty-value">1</span>
-          <button id="qty-plus" class="btn round" type="button">+</button>
-          <span class="times">×</span>
+      <div class="row-a">
+        <button id="btn-peek" class="btn peek-btn" type="button" title="Leertaste halten oder auf den eigenen Becher klicken">🎲 <span class="lbl-long">Unter den Becher schauen</span><span class="lbl-short">Schauen</span></button>
+        <!-- Schnell bieten: ein Tipp auf eine Würfelseite bietet das kleinste mögliche Gebot -->
+        <div id="quick-bids" class="quick-bids hidden"></div>
+        <div id="bid-controls" class="bid-controls hidden">
+          <div class="qty-picker">
+            <button id="qty-minus" class="btn round" type="button">−</button>
+            <span id="qty-value" class="qty-value">1</span>
+            <button id="qty-plus" class="btn round" type="button">+</button>
+            <span class="times">×</span>
+          </div>
+          <div id="face-picker" class="face-picker"></div>
+          <button id="btn-bid" class="btn primary bid-btn" type="button">Bieten</button>
         </div>
-        <div id="face-picker" class="face-picker"></div>
-        <button id="btn-bid" class="btn primary bid-btn" type="button">Bieten</button>
       </div>
-      <div id="call-controls" class="call-controls hidden">
-        <button id="btn-liar" class="btn liar" type="button">Lügner!</button>
-        <button id="btn-spot" class="btn spot hidden" type="button">Genau!</button>
+      <div class="row-b">
+        <button id="btn-custom" class="btn ghost small custom-btn hidden" type="button">✎ Anderes Gebot</button>
+        <div id="call-controls" class="call-controls hidden">
+          <button id="btn-liar" class="btn liar" type="button">Lügner!</button>
+          <button id="btn-spot" class="btn spot hidden" type="button">Genau!</button>
+        </div>
+        <div id="host-controls" class="host-controls"></div>
       </div>
-      <div id="host-controls" class="host-controls"></div>
     </div>
   </div>
 </section>
@@ -174,6 +190,7 @@
       <p>Alle schütteln ihre Würfel im Becher und knallen ihn umgedreht auf den Tisch. Nur du darfst unter deinen eigenen Becher schauen (<b>🎲-Knopf</b>, <b>Leertaste</b> oder Klick auf den Becher) – die anderen sehen, dass du nachschaust, aber nicht, was du hast.</p>
       <h3>Bieten</h3>
       <p>Reihum wird geboten, wie viele Würfel einer Augenzahl <b>insgesamt auf dem Tisch</b> liegen – also unter allen Bechern zusammen, z. B. „fünf Vierer“. Wer dran ist, muss <b>höher bieten</b> (mehr Würfel, oder gleiche Anzahl mit höherer Augenzahl) – oder „Lügner!“ rufen.</p>
+      <p><b>Schnell bieten:</b> Unten steht für jede Augenzahl das kleinste erlaubte Gebot – ein Tipp darauf bietet es sofort. Für höhere Gebote gibt es „✎ Anderes Gebot“.</p>
       <h3>Lügner!</h3>
       <p>Dann heben alle ihre Becher. Liegen <b>mindestens</b> so viele Würfel der gebotenen Augenzahl, hat die bietende Person recht und wer „Lügner!“ gerufen hat, verliert einen Würfel. Liegen weniger, verliert die bietende Person einen Würfel.</p>
       <h3>Einsen als Joker (einstellbar)</h3>
@@ -183,7 +200,7 @@
       <h3>Nächste Runde</h3>
       <p>Wer den Würfel verloren hat, beginnt die nächste Runde. Mit jeder Runde liegen weniger Würfel auf dem Tisch – und das Bluffen wird schwerer.</p>
       <h3>Steuerung</h3>
-      <p>Mit gedrückter Maus bzw. mit dem Finger ziehen, um dich am Tisch umzusehen. Doppelklick oder „🎯 Blick“ setzt die Ansicht zurück. Wer lange braucht, wird nicht automatisch bewegt – der Host kann nach einer Weile „Überspringen“ wählen (dann entscheidet ein Bot).</p>
+      <p>Mit gedrückter Maus bzw. mit dem Finger ziehen, um dich am Tisch umzusehen. Doppelklick oder „🎯 Blick“ setzt die Ansicht zurück. Jeder Zug hat ein Zeitlimit (in der Lobby einstellbar, Standard 30 Sekunden) – läuft es ab, entscheidet ein Bot für dich. Ohne Zeitlimit kann der Host nach einer Weile „Überspringen“ wählen.</p>
     </div>
   </div>
 </div>

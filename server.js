@@ -38,13 +38,16 @@ const BOT_NAME_POOL = [
 // Verzögerungen - per Umgebungsvariable änderbar, damit Tests nicht in Echtzeit laufen müssen.
 const BOT_DELAY_MIN = Number(process.env.BOT_DELAY_MIN_MS) || 1800;
 const BOT_DELAY_MAX = Number(process.env.BOT_DELAY_MAX_MS) || 3600;
-const REVEAL_MS = Number(process.env.REVEAL_MS) || 7500;       // Becher bleiben offen
+const REVEAL_MS = Number(process.env.REVEAL_MS) || 10000;      // Becher bleiben offen (Würfel werden reihum gezählt)
 const ROLL_LOCK_MS = Number(process.env.ROLL_LOCK_MS) || 2200;  // Becher schütteln, bevor geboten wird
 const SKIP_MIN_WAIT_MS = Number(process.env.SKIP_MIN_WAIT_MS) || 25000;
 const HOST_HANDOVER_MS = Number(process.env.HOST_HANDOVER_MS) || 20000;
 
-const DEFAULT_SETTINGS = { dice: 5, wildOnes: true, spotOn: false };
+const DEFAULT_SETTINGS = { dice: 5, wildOnes: true, spotOn: false, turnSec: 30 };
 const DICE_OPTIONS = [3, 4, 5, 6];
+const TURN_OPTIONS = [0, 15, 30, 60];
+// Nur für Tests: Zugzeit in ms erzwingen
+const TURN_MS_OVERRIDE = Number(process.env.TURN_MS_OVERRIDE) || 0;
 
 function randomDelay(min = BOT_DELAY_MIN, max = BOT_DELAY_MAX) { return min + Math.random() * (max - min); }
 function makeId() { return Math.random().toString(36).slice(2) + Date.now().toString(36); }
@@ -111,6 +114,9 @@ function createRoom() {
     hostTimer: null,
     cleanupTimer: null,
     botTimer: null,
+    turnTimer: null,
+    turnKey: null,
+    turnDeadline: 0,
     peekTimers: [],
     lastActivity: Date.now(),
   };
@@ -122,7 +128,7 @@ function createRoom() {
 function clearPeekTimers(room) { room.peekTimers.forEach((t) => clearTimeout(t)); room.peekTimers = []; }
 
 function destroyRoom(room) {
-  ['revealTimer', 'hostTimer', 'cleanupTimer', 'botTimer'].forEach((k) => { if (room[k]) clearTimeout(room[k]); room[k] = null; });
+  ['revealTimer', 'hostTimer', 'cleanupTimer', 'botTimer', 'turnTimer'].forEach((k) => { if (room[k]) clearTimeout(room[k]); room[k] = null; });
   clearPeekTimers(room);
   rooms.delete(room.code);
 }
@@ -237,6 +243,10 @@ function publicState(room) {
     reveal: g && g.phase !== 'bidding' ? g.reveal : null,
     rollMs: Math.max(0, room.rollUntil - now),
     revealMs: room.revealUntil ? Math.max(0, room.revealUntil - now) : 0,
+    // Zugzeit der Person am Zug (nur bei verbundenen Menschen mit eingeschaltetem Timer)
+    turnMs: room.turnDeadline && bidding ? turnLimitMs(room) : 0,
+    turnMsLeft: room.turnDeadline && bidding ? Math.max(0, room.turnDeadline - now) : 0,
+    startDice: room.game ? room.game.order.length * room.game.rules.dice : 0,
     events: room.events.slice(-12),
     eventSeq: room.eventSeq,
     winnerId: room.winnerId,
@@ -253,7 +263,33 @@ function sendDiceTo(room, player) {
   io.to(player.socketId).emit('yourDice', { round: g ? g.roundNo : 0, dice: g && g.dice[player.id] ? g.dice[player.id] : [] });
 }
 
+function turnLimitMs(room) { return TURN_MS_OVERRIDE || (room.settings.turnSec || 0) * 1000; }
+
+// Zug-Timer: Wer als verbundener Mensch zu lange braucht, für den entscheidet ein Bot.
+function updateTurnTimer(room) {
+  const g = room.game;
+  const limit = turnLimitMs(room);
+  const p = g && room.phase === 'playing' && g.phase === 'bidding' ? findPlayer(room, g.turn) : null;
+  const active = !!(p && !p.isBot && p.connected && limit > 0);
+  const key = active ? `${room.gameNo}|${g.turnNo}|${p.id}` : null;
+  if (key === room.turnKey) return;
+  if (room.turnTimer) { clearTimeout(room.turnTimer); room.turnTimer = null; }
+  room.turnKey = key;
+  room.turnDeadline = 0;
+  if (!active) return;
+  const start = Math.max(Date.now(), room.rollUntil || 0);
+  room.turnDeadline = start + limit;
+  room.turnTimer = setTimeout(() => {
+    room.turnTimer = null;
+    if (!rooms.has(room.code) || room.turnKey !== key || !room.game || room.game.phase !== 'bidding') return;
+    log(room, `${p.name} war zu langsam – ein Bot entscheidet.`);
+    room.turnKey = null; room.turnDeadline = 0;
+    botMove(room, p);
+  }, room.turnDeadline - Date.now());
+}
+
 function broadcastState(room) {
+  updateTurnTimer(room);
   io.to(room.code).emit('gameState', publicState(room));
   room.players.forEach((p) => sendDiceTo(room, p));
   scheduleBotTurnIfNeeded(room);
@@ -427,7 +463,8 @@ function scheduleHostHandover(room) {
 }
 
 function resetToLobby(room) {
-  ['revealTimer', 'botTimer'].forEach((k) => { if (room[k]) clearTimeout(room[k]); room[k] = null; });
+  ['revealTimer', 'botTimer', 'turnTimer'].forEach((k) => { if (room[k]) clearTimeout(room[k]); room[k] = null; });
+  room.turnKey = null; room.turnDeadline = 0;
   clearPeekTimers(room);
   room.phase = 'lobby';
   room.game = null;
@@ -593,6 +630,7 @@ io.on('connection', (socket) => {
     if (typeof s.wildOnes === 'boolean') room.settings.wildOnes = s.wildOnes;
     if (typeof s.spotOn === 'boolean') room.settings.spotOn = s.spotOn;
     if (DICE_OPTIONS.includes(Number(s.dice))) room.settings.dice = Number(s.dice);
+    if (TURN_OPTIONS.includes(Number(s.turnSec))) room.settings.turnSec = Number(s.turnSec);
     broadcastState(room);
   });
 

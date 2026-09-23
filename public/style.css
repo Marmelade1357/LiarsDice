@@ -217,6 +217,49 @@ input[type="checkbox"] { width: auto; }
 .btn.liar { background: linear-gradient(135deg, #c0392b, #7a1a12); border-color: #e06b5b; color: white; font-family: var(--serif); font-size: 1.05rem; font-weight: 800; letter-spacing: 0.02em; }
 .btn.spot { background: linear-gradient(135deg, #2f7a55, #154a30); border-color: #4fbf85; color: white; font-family: var(--serif); font-weight: 800; }
 .host-controls { display: flex; gap: 8px; }
+.row-a, .row-b { display: flex; gap: 10px; align-items: center; justify-content: center; flex-wrap: wrap; }
+
+/* Schnell bieten */
+.quick-bids { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+.quick-bid {
+  position: relative; display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
+  padding: 6px 10px 6px 12px; border-radius: 12px; border: 1px solid rgba(217,179,106,0.45);
+  background: linear-gradient(180deg, #213d55, #152a3c); color: var(--text); font-weight: 800; font-size: 1.05rem;
+  font-family: var(--serif); transition: transform 0.08s ease, filter 0.15s ease; -webkit-tap-highlight-color: transparent;
+}
+.quick-bid .die { --s: 30px; }
+.quick-bid:hover { filter: brightness(1.2); transform: translateY(-2px); }
+.quick-bid:active { transform: scale(0.95); }
+.quick-bid.hint { border-color: var(--gold-bright); box-shadow: 0 0 0 1px rgba(244,213,141,0.35), 0 0 12px rgba(244,213,141,0.25); }
+.quick-bid .tag-hint {
+  position: absolute; top: -9px; left: 50%; transform: translateX(-50%); white-space: nowrap;
+  font: 700 0.62rem "Segoe UI", Arial, sans-serif; padding: 1px 6px; border-radius: 6px;
+  background: var(--gold); color: #1a1205;
+}
+.custom-btn { white-space: nowrap; }
+
+/* Zug-Timer */
+.turn-timer { position: absolute; left: 0; right: 0; top: -1px; height: 4px; background: rgba(255,255,255,0.08); overflow: hidden; }
+.turn-timer i { display: block; height: 100%; width: 100%; background: linear-gradient(90deg, #d9b36a, #f4d58d); transition: width 0.2s linear, background 0.3s; }
+.turn-timer.low i { background: linear-gradient(90deg, #c0392b, #ff7a5a); }
+.status-line .secs { color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.control-bar.my-turn .status-line .secs { color: var(--gold-bright); }
+
+/* "Du bist dran" – Bildschirmrand leuchtet */
+.turn-flash { position: absolute; inset: 0; pointer-events: none; z-index: 11; border-radius: 0; box-shadow: inset 0 0 0 0 rgba(244,213,141,0); }
+.turn-flash.flash { animation: edge-flash 1.3s ease-out 1; }
+.turn-flash.hurry { animation: edge-hurry 1s ease-in-out infinite; }
+@keyframes edge-flash {
+  0% { box-shadow: inset 0 0 0 0 rgba(244,213,141,0); }
+  20% { box-shadow: inset 0 0 60px 12px rgba(244,213,141,0.75); }
+  45% { box-shadow: inset 0 0 20px 4px rgba(244,213,141,0.2); }
+  65% { box-shadow: inset 0 0 60px 12px rgba(244,213,141,0.65); }
+  100% { box-shadow: inset 0 0 0 0 rgba(244,213,141,0); }
+}
+@keyframes edge-hurry {
+  0%, 100% { box-shadow: inset 0 0 20px 2px rgba(220,60,40,0.15); }
+  50% { box-shadow: inset 0 0 70px 14px rgba(220,60,40,0.55); }
+}
 
 /* 2D-Fallback */
 .flat-table { position: absolute; inset: var(--header-h) 0 0 0; display: flex; flex-wrap: wrap; gap: 10px; align-content: center; justify-content: center; padding: 12px; background: radial-gradient(circle, #6b4526 0%, #3a2412 70%); }
@@ -250,8 +293,18 @@ input[type="checkbox"] { width: auto; }
   .status-line { font-size: 0.82rem; }
   .status-line .opt { display: none; }
   .peek-btn .lbl-long { display: none; }
-  .bid-controls { display: contents; }
-  .controls-row { row-gap: 8px; }
+  .controls-row { row-gap: 7px; flex-direction: column; }
+  .row-a, .row-b { gap: 6px; width: 100%; }
+  .row-a { flex-wrap: nowrap; }
+  .peek-btn { flex: 0 0 auto; padding: 8px 10px; }
+  .peek-btn .lbl-short { display: none; }
+  .quick-bids { flex-wrap: nowrap; gap: 4px; flex: 1 1 auto; justify-content: space-between; min-width: 0; }
+  .quick-bid { padding: 5px 6px; font-size: 0.92rem; gap: 3px; flex: 1 1 0; justify-content: center; min-width: 0; }
+  .quick-bid .die { --s: 24px; }
+  .quick-bid .tag-hint { font-size: 0.55rem; padding: 0 4px; top: -8px; }
+  .bid-controls { gap: 5px; flex-wrap: wrap; }
+  .face-btn .die { --s: 26px; }
+  .row-a:has(#bid-controls:not(.hidden)) { flex-wrap: wrap; }
   .btn.liar { padding: 9px 14px; }
   .game-header { padding: 7px 8px; }
   .round-badge .extra { display: none; }

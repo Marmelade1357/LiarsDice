@@ -5,6 +5,7 @@
 // Build: npm run build3d  ->  public/table3d.js (gebündelt, minifiziert)
 
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 const FONT = '"Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif';
 const SERIF = 'Georgia, "Times New Roman", serif';
@@ -43,7 +44,8 @@ let shakeT = 0;
 let maxAniso = 4;
 let lowEnd = false;
 let t = 0;
-let labelScale = 1, basePitch = -0.28;
+let labelScale = 1, basePitch = -0.3, lastManualLook = 0, portraitMode = false;
+let countSprite = null, reveal = null; // laufendes Aufdecken (Zähl-Animation)
 function scaleSprites(st) {
   st.label.scale.set(0.5 * labelScale, (0.5 * labelScale * 96) / 512, 1);
   st.bubble.scale.set(0.4 * labelScale, (0.4 * labelScale * 200) / 420, 1);
@@ -178,35 +180,52 @@ function barkTexture() {
 // Umgebung: Himmel, Meer, Insel, Palmen, Schiff, Requisiten
 // ---------------------------------------------------------------------------
 const SUN_DIR = new THREE.Vector3(-0.72, 0.2, -0.66).normalize();
+const MOON_DIR = new THREE.Vector3(0.55, 0.42, -0.72).normalize();
+// Tageszeit: 0 = später Nachmittag, 1 = Nacht (je mehr Würfel verloren, desto später)
+let nightCur = 0, nightTarget = 0;
+let moonLight = null, hemiLight = null, fillLight = null, nightLights = [];
 
 function buildSky() {
   const geo = new THREE.SphereGeometry(500, 32, 16);
   const mat = new THREE.ShaderMaterial({
     side: THREE.BackSide, depthWrite: false, fog: false,
-    uniforms: { sunDir: { value: SUN_DIR } },
+    uniforms: { sunDir: { value: SUN_DIR }, moonDir: { value: MOON_DIR }, night: { value: 0 } },
     vertexShader: `varying vec3 vDir; void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
     fragmentShader: `
-      uniform vec3 sunDir; varying vec3 vDir;
+      uniform vec3 sunDir; uniform vec3 moonDir; uniform float night; varying vec3 vDir;
+      float hash(vec3 p){ return fract(sin(dot(p, vec3(12.9898,78.233,37.719))) * 43758.5453); }
       void main(){
-        float y = max(vDir.y, -0.05);
-        vec3 zenith = vec3(0.10,0.22,0.45);
-        vec3 mid = vec3(0.45,0.55,0.75);
-        vec3 horizon = vec3(1.0,0.66,0.42);
+        vec3 d = normalize(vDir);
+        float y = max(d.y, -0.05);
+        float n1 = smoothstep(0.0, 0.6, night), n2 = smoothstep(0.5, 1.0, night);
+        vec3 zenith = mix(mix(vec3(0.10,0.22,0.45), vec3(0.08,0.10,0.28), n1), vec3(0.01,0.02,0.06), n2);
+        vec3 mid = mix(mix(vec3(0.45,0.55,0.75), vec3(0.42,0.30,0.48), n1), vec3(0.03,0.05,0.13), n2);
+        vec3 horizon = mix(mix(vec3(1.0,0.66,0.42), vec3(0.95,0.36,0.2), n1), vec3(0.07,0.09,0.18), n2);
         vec3 col = mix(horizon, mid, smoothstep(0.0, 0.18, y));
         col = mix(col, zenith, smoothstep(0.18, 0.7, y));
-        float s = max(dot(normalize(vDir), sunDir), 0.0);
-        col += vec3(1.0,0.55,0.25) * pow(s, 6.0) * 0.55;
-        col += vec3(1.0,0.85,0.6) * pow(s, 60.0) * 0.8;
-        col += vec3(1.0,0.95,0.8) * smoothstep(0.9985, 0.9993, s) * 3.0;
+        float sunVis = 1.0 - smoothstep(0.6, 0.9, night);
+        float s = max(dot(d, sunDir), 0.0);
+        col += vec3(1.0,0.5,0.2) * pow(s, 6.0) * 0.55 * sunVis;
+        col += vec3(1.0,0.8,0.55) * pow(s, 60.0) * 0.8 * sunVis;
+        col += vec3(1.0,0.9,0.7) * smoothstep(0.9985, 0.9993, s) * 3.0 * sunVis * step(-0.02, d.y);
+        // Sterne und Mond
+        vec3 cell = floor(d * 260.0);
+        float h = hash(cell);
+        float star = step(0.9965, h) * (0.6 + 0.4 * hash(cell + 7.0));
+        col += vec3(0.9,0.95,1.0) * star * n2 * smoothstep(0.03, 0.25, y);
+        float m = max(dot(d, moonDir), 0.0);
+        col += vec3(0.95,0.97,1.0) * smoothstep(0.99955, 0.99975, m) * 2.2 * n2;
+        col += vec3(0.4,0.5,0.8) * pow(m, 80.0) * 0.35 * n2;
         // ein paar Schleierwolken
-        float cl = sin(vDir.x*9.0 + vDir.z*3.0) * sin(vDir.z*7.0 - vDir.x*2.0) * 0.5 + 0.5;
+        float cl = sin(d.x*9.0 + d.z*3.0) * sin(d.z*7.0 - d.x*2.0) * 0.5 + 0.5;
         cl *= smoothstep(0.03, 0.12, y) * (1.0 - smoothstep(0.25, 0.45, y));
-        col = mix(col, vec3(1.0,0.78,0.62), cl * 0.28);
+        col = mix(col, mix(vec3(1.0,0.78,0.62), vec3(0.12,0.13,0.2), n2), cl * 0.28);
         gl_FragColor = vec4(col, 1.0);
         #include <colorspace_fragment>
       }`,
   });
   sky = new THREE.Mesh(geo, mat);
+  sky.userData.dynamic = true;
   sky.renderOrder = -10;
   scene.add(sky);
 }
@@ -217,7 +236,7 @@ function buildWater() {
   geo.rotateX(-Math.PI / 2);
   const mat = new THREE.ShaderMaterial({
     fog: false,
-    uniforms: { time: { value: 0 }, sunDir: { value: SUN_DIR } },
+    uniforms: { time: { value: 0 }, sunDir: { value: SUN_DIR }, moonDir: { value: MOON_DIR }, night: { value: 0 } },
     vertexShader: `
       uniform float time; varying vec3 vPos; varying float vH;
       float wave(vec2 p){
@@ -235,33 +254,39 @@ function buildWater() {
         gl_Position = projectionMatrix * viewMatrix * vec4(vPos,1.0);
       }`,
     fragmentShader: `
-      uniform float time; uniform vec3 sunDir; varying vec3 vPos; varying float vH;
+      uniform float time; uniform vec3 sunDir; uniform vec3 moonDir; uniform float night; varying vec3 vPos; varying float vH;
       void main(){
+        float n1 = smoothstep(0.0, 0.6, night), n2 = smoothstep(0.5, 1.0, night);
         vec3 dx = dFdx(vPos); vec3 dy = dFdy(vPos);
         vec3 n = normalize(cross(dx, dy)); if (n.y < 0.0) n = -n;
         vec3 v = normalize(cameraPosition - vPos);
         float fres = pow(1.0 - max(dot(n, v), 0.0), 3.0);
         float d = length(vPos.xz);
-        vec3 deep = vec3(0.03,0.16,0.28);
-        vec3 shallow = vec3(0.12,0.62,0.62);
+        vec3 deep = mix(vec3(0.03,0.16,0.28), vec3(0.01,0.035,0.08), n2);
+        vec3 shallow = mix(vec3(0.12,0.62,0.62), vec3(0.03,0.13,0.18), n2);
         vec3 col = mix(shallow, deep, smoothstep(11.5, 26.0, d));
-        vec3 skyc = mix(vec3(1.0,0.7,0.5), vec3(0.45,0.55,0.75), clamp(v.y*3.0,0.0,1.0));
+        vec3 hz = mix(mix(vec3(1.0,0.7,0.5), vec3(0.9,0.4,0.25), n1), vec3(0.07,0.09,0.18), n2);
+        vec3 up = mix(vec3(0.45,0.55,0.75), vec3(0.03,0.05,0.13), n2);
+        vec3 skyc = mix(hz, up, clamp(v.y*3.0,0.0,1.0));
         col = mix(col, skyc, clamp(fres*0.85, 0.0, 0.85));
         vec3 r = reflect(-v, n);
         float s = max(dot(r, sunDir), 0.0);
-        col += vec3(1.0,0.75,0.45) * (pow(s, 90.0) * 2.2 + pow(s, 12.0) * 0.18);
+        col += mix(vec3(1.0,0.75,0.45), vec3(1.0,0.4,0.2), n1) * (pow(s, 90.0) * 2.2 + pow(s, 12.0) * 0.18) * (1.0 - smoothstep(0.6, 0.9, night));
+        float mo = max(dot(r, moonDir), 0.0);
+        col += vec3(0.75,0.82,1.0) * (pow(mo, 120.0) * 1.6 + pow(mo, 16.0) * 0.08) * n2;
         // Schaum an der Küste
         float shore = 1.0 - smoothstep(0.0, 1.4, abs(d - 11.3 - sin(time*0.8 + atan(vPos.z, vPos.x)*7.0)*0.25));
         float foam = shore * (0.55 + 0.45*sin(d*6.0 - time*2.5));
         foam += smoothstep(0.13, 0.2, vH) * 0.35 * (1.0 - smoothstep(30.0, 90.0, d));
-        col = mix(col, vec3(0.95,0.97,0.95), clamp(foam, 0.0, 0.9));
+        col = mix(col, mix(vec3(0.95,0.97,0.95), vec3(0.35,0.4,0.5), n2), clamp(foam, 0.0, 0.9));
         // Dunst am Horizont
-        col = mix(col, vec3(1.0,0.72,0.52), smoothstep(120.0, 430.0, d));
+        col = mix(col, hz, smoothstep(120.0, 430.0, d));
         gl_FragColor = vec4(col, 1.0);
         #include <colorspace_fragment>
       }`,
   });
   water = new THREE.Mesh(geo, mat);
+  water.userData.dynamic = true;
   water.position.y = -0.62;
   scene.add(water);
 }
@@ -335,6 +360,7 @@ function buildPalm(x, z, height, leanX, leanZ, seed) {
     holder.rotation.z = -0.1 + (i % 2) * 0.12;
     holder.add(leaf);
     crown.add(holder);
+    holder.userData.dynamic = true;
     fronds.push({ obj: holder, base: holder.rotation.z, ph: i * 0.7 + seed });
   }
   const nut = std(0x4a2e14, 0.7);
@@ -394,6 +420,7 @@ function makeShip(o) {
   g.rotation.y = o.rot || 0;
   g.scale.setScalar(o.scale || 1);
   scene.add(g);
+  g.userData.dynamic = true;
   ships.push({ g, bob: o.bob || 0, speed: o.speed || 0, path: o.path || null });
   return g;
 }
@@ -433,6 +460,7 @@ function buildPirateIsland() {
   const flag = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 1.05, 12, 4), new THREE.MeshStandardMaterial({ map: jollyRogerTexture(), side: THREE.DoubleSide, roughness: 1 }));
   flag.geometry.translate(0.8, 0, 0);
   flag.position.set(-1.35, 4.6, -5.2); flag.rotation.y = 0.35; scene.add(flag);
+  flag.userData.dynamic = true;
   flags.push({ mesh: flag, base: flag.geometry.attributes.position.array.slice(), ph: 0, amp: 0.12, fromPole: true });
 
   // Kanone mit Kugeln, zeigt aufs Meer
@@ -504,6 +532,7 @@ function buildPirateIsland() {
   const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture(), color: 0xff8a30, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
   glow.scale.set(2.2, 2.2, 1); glow.position.y = 0.4; fire.add(glow);
   fire.position.set(-5.6, 0, 0.9); scene.add(fire);
+  flame.userData.dynamic = inner.userData.dynamic = true;
   torches.push({ flame, inner, glow, ph: 11 });
   const spit = mesh(new THREE.CylinderGeometry(0.02, 0.02, 1.1, 6), std(0x4a3320)); spit.rotation.z = Math.PI / 2; spit.position.set(-5.6, 0.75, 0.9); scene.add(spit);
   [-0.5, 0.5].forEach((dx) => { const st = mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.8, 6), std(0x4a3320)); st.position.set(-5.6 + dx, 0.4, 0.9); scene.add(st); });
@@ -526,6 +555,7 @@ function buildPirateIsland() {
   });
   const ptail = mesh(new THREE.ConeGeometry(0.035, 0.25, 6), std(0x2a60d0, 0.7)); ptail.rotation.x = 2.6; ptail.position.set(0, 0.0, 0.1); parrot.add(ptail);
   parrot.position.set(-3.45, 1.8, -1.6); parrot.rotation.y = 0.9; scene.add(parrot);
+  parrot.userData.dynamic = true;
   critters.parrot = parrot;
 
   // Krabbe, die über den Sand läuft
@@ -538,6 +568,7 @@ function buildPirateIsland() {
     const eye = mesh(new THREE.SphereGeometry(0.014, 6, 5), std(0x111111), false, false); eye.position.set(sd * 0.03, 0.12, -0.06); crab.add(eye);
   });
   scene.add(crab);
+  crab.userData.dynamic = true;
   critters.crab = crab;
 
   // Möwen am Himmel
@@ -549,6 +580,7 @@ function buildPirateIsland() {
     const wr = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.18), gullMat); wr.geometry.translate(0.45, 0, 0); gl.add(wr);
     wl.rotation.x = wr.rotation.x = -Math.PI / 2;
     const wlp = new THREE.Group(); wlp.add(wl); const wrp = new THREE.Group(); wrp.add(wr); gl.add(wlp); gl.add(wrp);
+    gl.userData.dynamic = true;
     scene.add(gl);
     critters.gulls.push({ g: gl, wl: wlp, wr: wrp, r: 16 + i * 6, h: 11 + i * 2.5, sp: 0.12 + i * 0.03, ph: i * 1.7 });
   }
@@ -575,6 +607,7 @@ function buildTorch(x, z) {
   glow.scale.set(1.1, 1.1, 1); glow.position.y = 1.95; g.add(glow);
   g.position.set(x, 0, z);
   scene.add(g);
+  flame.userData.dynamic = inner.userData.dynamic = true;
   torches.push({ flame, inner, glow, ph: x * 3 + z });
 }
 
@@ -650,6 +683,41 @@ function addHoops(b, r, h) {
 // ---------------------------------------------------------------------------
 // Tisch (wächst mit der Spielerzahl)
 // ---------------------------------------------------------------------------
+// Statische Deko zu wenigen großen Meshes zusammenfassen (ein Draw-Call pro Material statt hunderte)
+function batchStatic(root, local) {
+  root.updateMatrixWorld(true);
+  const inv = new THREE.Matrix4().copy(root.matrixWorld).invert();
+  const groups = new Map();
+  (function walk(o) {
+    if (o.userData.dynamic && o !== root) return;
+    if (o.isMesh && !o.isInstancedMesh && o.material && !Array.isArray(o.material) && !o.material.transparent && o.geometry.attributes.uv) {
+      const key = `${o.material.uuid}|${o.castShadow}|${o.receiveShadow}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(o);
+    }
+    o.children.slice().forEach(walk);
+  })(root);
+  let merged = 0;
+  groups.forEach((list) => {
+    if (list.length < 2) return;
+    const geos = list.map((o) => {
+      let g2 = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone();
+      const keep = new THREE.BufferGeometry();
+      ['position', 'normal', 'uv'].forEach((a) => { if (g2.attributes[a]) keep.setAttribute(a, g2.attributes[a]); });
+      keep.applyMatrix4(local ? new THREE.Matrix4().multiplyMatrices(inv, o.matrixWorld) : o.matrixWorld);
+      return keep;
+    });
+    const geo = mergeGeometries(geos, false);
+    if (!geo) return;
+    const m = new THREE.Mesh(geo, list[0].material);
+    m.castShadow = list[0].castShadow; m.receiveShadow = list[0].receiveShadow;
+    root.add(m);
+    list.forEach((o) => { if (o.parent) o.parent.remove(o); });
+    merged += list.length;
+  });
+  return merged;
+}
+
 function radiusFor(n) { return Math.max(0.8, (n * 0.95) / (Math.PI * 2) + 0.22); }
 
 function buildTable(n) {
@@ -680,7 +748,9 @@ function buildTable(n) {
   addHoops(leg, 0.36 + tableR * 0.14, TABLE_Y - 0.06);
   // Laterne in der Mitte
   lantern = buildLantern();
+  lantern.userData.dynamic = true;
   tableGroup.add(lantern);
+  batchStatic(tableGroup, true);
   scene.add(tableGroup);
 }
 
@@ -782,7 +852,7 @@ function buildCharacter(id, isMe) {
 
   // Hocker (kleines Fass)
   const stool = mesh(barrelGeometry(0.17, 0.2, 0.46), std(0xffffff, 0.85, { map: canvasTex(woodCanvas(128, 64, '#6a4526', 8)) }));
-  stool.position.set(0, 0.23, 0.05); g.add(stool);
+  stool.position.set(0, 0.23, 0.05); if (!isMe) g.add(stool); // den eigenen Hocker sieht man nie
 
   const body = new THREE.Group(); g.add(body); parts.body = body;
   body.position.set(0, 0.48, 0.05);
@@ -820,6 +890,8 @@ function buildCharacter(id, isMe) {
       } else {
         const e = mesh(new THREE.SphereGeometry(0.034, 12, 10), white, false, false); e.scale.set(1, 1.2, 0.7); e.position.set(x, 0.045, -0.105); head.add(e);
         const pu = mesh(new THREE.SphereGeometry(0.016, 8, 6), pupil, false, false); pu.position.set(x * 0.95, 0.045, -0.128); head.add(pu);
+        e.userData.dynamic = pu.userData.dynamic = true;
+        parts.eyes = (parts.eyes || []).concat([{ m: e, sy: 1.2 }, { m: pu, sy: 1 }]);
       }
     });
     // Ohrring
@@ -859,9 +931,16 @@ function buildCharacter(id, isMe) {
     const cf = mesh(new THREE.CylinderGeometry(0.05, 0.044, 0.045, 8), lace);
     const hand = mesh(new THREE.SphereGeometry(0.05, 10, 8), feather); hand.scale.set(0.7, 1.5, 0.95);
     g.add(upper); g.add(fore); g.add(cf); g.add(hand);
-    return { side, upper, fore, cuff: cf, hand, target: new THREE.Vector3(), cur: null };
+    return { side, upper, fore, cuff: cf, hand, target: new THREE.Vector3(), cur: null, short: isMe };
   });
   g.userData.parts = parts;
+  // Starre Teile der Figur zusammenfassen (weniger Draw-Calls): Kopf und Rumpf je für sich
+  if (parts.head) {
+    parts.head.userData.dynamic = true; batchStatic(parts.head, true);
+    batchStatic(parts.torso, true);
+    parts.torso.userData.dynamic = true; batchStatic(parts.body, true);
+  }
+  if (parts.eyes) parts.eyes = parts.eyes.filter((e) => e.m.parent); // Augen bleiben einzeln (Blinzeln)
   return parts;
 }
 
@@ -911,7 +990,11 @@ function solveArm(arm, shoulder, target) {
   bend.addScaledVector(axis, -bend.dot(axis)).normalize();
   const elbow = mid.addScaledVector(bend, hgt);
   setLimb(arm.upper, shoulder, elbow);
-  setLimb(arm.fore, elbow, T);
+  if (arm.short) {
+    // Eigene Flügel: nur Flügelspitze, Manschette und ein kurzes, schmales Stück Ärmel
+    const st = elbow.clone().lerp(T, 0.62);
+    setLimb(arm.fore, st, T); arm.fore.scale.x = arm.fore.scale.z = 0.72;
+  } else setLimb(arm.fore, elbow, T);
   arm.cuff.position.copy(elbow).lerp(T, 0.9);
   arm.cuff.quaternion.copy(arm.fore.quaternion);
   arm.hand.position.copy(T);
@@ -937,9 +1020,21 @@ function paintLabel(sp, s) {
   let name = (s.out ? '☠ ' : '') + (s.host ? '👑 ' : '') + (s.bot ? '🤖 ' : '') + s.name;
   while (c.measureText(name).width > W - 70 && name.length > 3) name = name.slice(0, -2);
   const tw = Math.min(W - 16, c.measureText(name).width + 56);
+  const bx = (W - tw) / 2, bh = H - 20, rad = bh / 2;
   c.fillStyle = s.turn ? 'rgba(90,62,12,0.92)' : 'rgba(14,26,38,0.8)';
-  rr(c, (W - tw) / 2, 10, tw, H - 20, (H - 20) / 2); c.fill();
-  c.lineWidth = s.turn ? 7 : 3; c.strokeStyle = s.turn ? '#f4c95d' : 'rgba(200,160,90,0.6)'; c.stroke();
+  rr(c, bx, 10, tw, bh, rad); c.fill();
+  if (s.turn && s.progress !== null && s.progress !== undefined) {
+    // Zug-Timer: der Rahmen leert sich
+    c.lineWidth = 7; c.strokeStyle = 'rgba(244,201,93,0.25)'; c.stroke();
+    const per = 2 * (tw - 2 * rad) + 2 * Math.PI * rad;
+    c.save(); c.setLineDash([per * s.progress, per + 10]);
+    c.strokeStyle = s.progress < 0.27 ? '#ff6a4a' : '#f4c95d';
+    c.beginPath();
+    // Start oben in der Mitte, im Uhrzeigersinn
+    c.moveTo(W / 2, 10); c.arcTo(bx + tw, 10, bx + tw, 10 + bh, rad); c.arcTo(bx + tw, 10 + bh, bx, 10 + bh, rad);
+    c.arcTo(bx, 10 + bh, bx, 10, rad); c.arcTo(bx, 10, bx + tw, 10, rad); c.lineTo(W / 2, 10);
+    c.stroke(); c.restore();
+  } else { c.lineWidth = s.turn ? 7 : 3; c.strokeStyle = s.turn ? '#f4c95d' : 'rgba(200,160,90,0.6)'; c.stroke(); }
   c.textAlign = 'center'; c.textBaseline = 'middle';
   c.fillStyle = s.out ? '#9a9a9a' : (s.away ? '#e0a060' : '#fff4dc');
   c.fillText(name, W / 2, H / 2 + 2);
@@ -1187,7 +1282,7 @@ export function init(opts) {
   scene.fog = new THREE.Fog(0xf0b58a, 40, 260);
   camera = new THREE.PerspectiveCamera(60, 1, 0.05, 1200);
 
-  const hemi = new THREE.HemisphereLight(0xffd8b0, 0x6a5040, 0.9); scene.add(hemi);
+  const hemi = new THREE.HemisphereLight(0xffd8b0, 0x6a5040, 0.9); scene.add(hemi); hemiLight = hemi;
   sunLight = new THREE.DirectionalLight(0xffc890, 2.6);
   sunLight.position.copy(SUN_DIR).multiplyScalar(30);
   sunLight.castShadow = true;
@@ -1197,7 +1292,12 @@ export function init(opts) {
   scene.add(sunLight); scene.add(sunLight.target);
   lanternLight = new THREE.PointLight(0xffa050, 2.2, 6, 1.6);
   lanternLight.position.set(0, TABLE_Y + 0.35, 0); scene.add(lanternLight);
-  const fill = new THREE.DirectionalLight(0x8fb0ff, 0.35); fill.position.set(5, 6, 8); scene.add(fill);
+  const fill = new THREE.DirectionalLight(0x8fb0ff, 0.35); fill.position.set(5, 6, 8); scene.add(fill); fillLight = fill;
+  moonLight = new THREE.DirectionalLight(0x9fb4ff, 0); moonLight.position.copy(MOON_DIR).multiplyScalar(30); scene.add(moonLight);
+  // Fackel- und Lagerfeuer-Licht (tagsüber aus, nachts an)
+  [[2.2, 1.95, -3.3, 5], [-5.6, 0.6, 0.9, 7], [-2.4, 1.95, -2.9, 5]].forEach(([x, y, z, dist]) => {
+    const l = new THREE.PointLight(0xff9040, 0, dist, 1.5); l.position.set(x, y, z); scene.add(l); nightLights.push(l);
+  });
 
   buildSky();
   buildWater();
@@ -1212,11 +1312,18 @@ export function init(opts) {
   buildTorch(-2.4, -2.9);
   buildTorch(2.7, 2.6);
   buildTorch(2.2, -3.3);
+  batchStatic(scene);
   centerSprite = makeSprite(512, 160, 0.62);
   centerSprite.position.set(0, TABLE_Y + 0.5, 0);
   centerSprite.visible = false;
   centerSprite.renderOrder = 7;
   scene.add(centerSprite);
+  // Große Zählanzeige beim Aufdecken
+  countSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: canvasTex(mkCanvas(512, 288)), transparent: true, depthTest: false, depthWrite: false }));
+  countSprite.userData.cv = countSprite.material.map.image;
+  countSprite.renderOrder = 30; countSprite.visible = false;
+  countSprite.position.set(0, TABLE_Y + 0.7, 0);
+  scene.add(countSprite);
 
   // Umsehen per Ziehen (Maus / Finger), Klick auf den eigenen Becher = nachschauen
   let down = null;
@@ -1231,8 +1338,9 @@ export function init(opts) {
       if (Math.hypot(dx, dy) > 5) down.moved = true;
       if (down.moved) {
         const k = 2.2 / Math.max(300, canvas.clientWidth);
-        yaw = clamp(down.yaw - dx * k * 1.2, -1.25, 1.25);
-        pitch = clamp(down.pitch - dy * k, -0.95, 0.35);
+        yaw = clamp(down.yaw - dx * k * 1.2, -1.35, 1.35);
+        pitch = clamp(down.pitch - dy * k, -1.05, 0.35);
+        lastManualLook = performance.now();
       }
     } else if (e.pointerType !== 'touch') {
       canvas.style.cursor = pickMyCup(e) ? 'pointer' : 'grab';
@@ -1273,18 +1381,20 @@ function resize() {
   camera.aspect = w / h;
   // Hochformat: weiter aufziehen, damit der Tisch in die Breite passt
   const portrait = camera.aspect < 1;
-  const hfov = (portrait ? 68 : 84) * (Math.PI / 180);
+  portraitMode = portrait;
+  // Breiteres Sichtfeld, damit auch die direkten Nachbarn noch im Bild sind
+  const hfov = (portrait ? 76 : 98) * (Math.PI / 180);
   const vNeeded = 2 * Math.atan(Math.tan(hfov / 2) / camera.aspect) * (180 / Math.PI);
-  camera.fov = clamp(Math.max(58, vNeeded), 58, 96);
+  camera.fov = clamp(Math.max(58, vNeeded), 58, 100);
   camera.updateProjectionMatrix();
   labelScale = portrait ? 1.7 : (camera.aspect < 1.4 ? 1.25 : 1);
-  basePitch = portrait ? -0.2 : -0.28;
+  basePitch = portrait ? -0.42 : -0.34;
   Object.values(seats).forEach((st) => scaleSprites(st));
   const cs = portrait ? 1.15 : labelScale;
   if (centerSprite) centerSprite.scale.set(0.62 * cs, (0.62 * cs * 160) / 512, 1);
 }
 
-export function resetView() { yaw = 0; pitch = basePitch; }
+export function resetView() { yaw = 0; pitch = basePitch; lastManualLook = 0; }
 
 export function setVisible(v) {
   const was = visible;
@@ -1312,12 +1422,17 @@ function canPeek(s) {
   return v && v.gamePhase === 'bidding' && !s.anim && s.pose.flip < 0.01 && !s.out;
 }
 
+function turnProgress(view) {
+  if (!view || !view.turnMs || !view.turnDeadline) return null;
+  return clamp((view.turnDeadline - Date.now()) / view.turnMs, 0, 1);
+}
 function updateLabel(s, p, view) {
   const turn = view.currentTurnId === p.id;
-  const key = [p.name, p.eliminated, turn, p.isBot, p.connected, p.isHost].join('|');
+  const prog = turn ? turnProgress(view) : null;
+  const key = [p.name, p.eliminated, turn, p.isBot, p.connected, p.isHost, prog === null ? '' : Math.round(prog * 80)].join('|');
   if (s.labelKey === key) return;
   s.labelKey = key;
-  paintLabel(s.label, { name: p.name, dice: p.dice, out: p.eliminated, turn, bot: p.isBot, away: !p.connected && !p.isBot, host: p.isHost });
+  paintLabel(s.label, { name: p.name, dice: p.dice, out: p.eliminated, turn, bot: p.isBot, away: !p.connected && !p.isBot, host: p.isHost, progress: prog });
 }
 
 function showBubble(s, b, ms, sticky) {
@@ -1340,6 +1455,7 @@ function setCenter(info) {
 // Zustand ohne Animation herstellen (Einstieg, Wiederverbindung, verpasste Ereignisse)
 function snapToState(view) {
   const r = view.reveal;
+  if (view.gamePhase === 'bidding' && countSprite) countSprite.visible = false;
   seatOrder.forEach((s) => {
     const p = view.players.find((q) => q.id === s.id);
     if (!p) return;
@@ -1361,7 +1477,7 @@ function snapToState(view) {
     }
     applyPose(s);
   });
-  if (view.reveal) highlight(view.reveal, true);
+  if (view.reveal && !(reveal && reveal.key === 'rv' + view.roundNo)) { highlight(view.reveal, true); showVerdict(view.reveal); }
 }
 
 function highlight(r, on) {
@@ -1403,15 +1519,65 @@ export function update(view) {
     setCenter({ top: `Gebot von ${b ? b.name : '?'}`, qty: view.bid.qty, face: view.bid.face });
   } else if (view.gamePhase === 'bidding') {
     setCenter({ top: `Runde ${view.roundNo}`, big: 'Neue Runde' });
-  } else if (view.reveal && revealShown(view)) {
-    const r = view.reveal;
-    setCenter({ top: `Gebot ${r.bid.qty} × ${r.bid.face}er – es liegen`, qty: r.actual, face: r.bid.face, tone: r.correct ? 'good' : 'bad' });
   } else setCenter(null);
+  // Tageszeit: mit jedem verlorenen Würfel geht die Sonne weiter unter
+  if (view.startDice > 2 && view.totalDice) nightTarget = clamp((view.startDice - view.totalDice) / (view.startDice - 2), 0, 1);
   if (!view.bid) seatOrder.forEach((s) => { if (s.bubbleSticky && !s.bubble.userData.challenge) { s.bubble.visible = false; s.bubbleSticky = false; } });
 }
 
-let revealShownAt = 0;
-function revealShown(view) { return performance.now() >= revealShownAt || !view.expectAnim; }
+// Zeitplan des Aufdeckens (muss zu revealTiming() in client.js passen)
+function revealTiming(actual) {
+  const step = Math.max(180, Math.min(380, 2600 / Math.max(1, actual)));
+  const countStart = 1600;
+  const countEnd = countStart + actual * step;
+  return { step, countStart, countEnd, verdict: countEnd + 350, banner: countEnd + 1300 };
+}
+function isMatch(v, face, wild) { return v === face || (wild && v === 1 && face !== 1); }
+function paintCount(opts) {
+  const cv = countSprite.userData.cv; const c = cv.getContext('2d');
+  const W = cv.width, H = cv.height;
+  c.clearRect(0, 0, W, H);
+  c.textAlign = 'center'; c.textBaseline = 'middle'; c.lineJoin = 'round';
+  if (opts.num !== undefined) {
+    c.font = `900 190px ${SERIF}`;
+    c.lineWidth = 22; c.strokeStyle = 'rgba(20,10,0,0.85)'; c.strokeText(String(opts.num), W / 2 - 50, 130);
+    c.fillStyle = '#f4d58d'; c.fillText(String(opts.num), W / 2 - 50, 130);
+    drawDieIcon(c, W / 2 + 60, 72, 110, opts.face);
+  } else {
+    c.font = `900 118px ${SERIF}`;
+    c.lineWidth = 20; c.strokeStyle = 'rgba(0,0,0,0.85)'; c.strokeText(opts.big, W / 2, 96);
+    c.fillStyle = opts.color; c.fillText(opts.big, W / 2, 96);
+    // Unterzeile: "8 × [Würfel] liegen · Gebot 6"
+    c.font = `700 40px ${FONT}`;
+    const a = `${opts.actual} ×`; const b = `liegen · Gebot ${opts.qty}`;
+    const wa = c.measureText(a).width, wb = c.measureText(b).width, ds = 46, gap = 12;
+    const tot = wa + gap + ds + gap + wb; let x = W / 2 - tot / 2;
+    c.fillStyle = 'rgba(10,20,30,0.82)'; rr(c, x - 20, 176, tot + 40, 70, 35); c.fill();
+    c.fillStyle = '#fff4dc'; c.textAlign = 'left';
+    c.fillText(a, x, 212); x += wa + gap;
+    drawDieIcon(c, x, 212 - ds / 2, ds, opts.face); x += ds + gap;
+    c.fillText(b, x, 212);
+  }
+  countSprite.material.map.needsUpdate = true;
+  countSprite.visible = true;
+  countSprite.userData.popT = performance.now();
+}
+function showVerdict(r) {
+  const liar = r.kind !== 'spot';
+  const big = liar ? (r.correct ? 'Gelogen!' : 'Stimmt!') : (r.correct ? 'Genau!' : 'Daneben!');
+  const color = (liar && r.correct) || (!liar && !r.correct) ? '#ff6a55' : '#7fe39a';
+  paintCount({ big, color, actual: r.actual, qty: r.bid.qty, face: r.bid.face });
+}
+function jumpDie(m) {
+  const base = m.position.y;
+  const rot0 = m.rotation.y;
+  m.userData.match = true;
+  addTween(320, 0, (p) => {
+    m.position.y = base + Math.sin(Math.PI * p) * 0.12 + p * 0.012;
+    m.rotation.y = rot0 + p * Math.PI * 0.5;
+    m.scale.setScalar(1 + p * 0.14);
+  });
+}
 
 export function events(list) {
   if (!lastView || !renderer) return;
@@ -1420,6 +1586,8 @@ export function events(list) {
       case 'roll': {
         const v = lastView;
         let i = 0;
+        reveal = null; countSprite.visible = false;
+        seatOrder.forEach((s) => { s.cheer = false; });
         seatOrder.forEach((s) => {
           const p = v.players.find((q) => q.id === s.id);
           if (!p || p.eliminated) { s.cupRoot.visible = false; clearDice(s); return; }
@@ -1443,7 +1611,7 @@ export function events(list) {
         s.bubble.userData.challenge = false;
         showBubble(s, { qty: ev.qty, face: ev.face }, 60000, true);
         s.nod = 1;
-        if (O && O.sound) O.sound('bid', 0.5);
+        if (O && O.sound) { O.sound('bid', 0.4); O.sound('quack', s.isMe ? 0.35 : 0.5, duckPitch(s.id), 1); }
         break;
       }
       case 'challenge': {
@@ -1451,60 +1619,129 @@ export function events(list) {
         seatOrder.forEach((o) => { if (o !== s && o.id !== ev.bidderId) { o.bubbleUntil = Math.min(o.bubbleUntil, performance.now() + 200); } });
         showBubble(s, { kind: ev.kind }, 60000, true);
         s.bubble.userData.challenge = true;
-        s.slam = 1;
+        s.slam = 1; s.flap = 1;
         shakeT = 0.25;
-        if (O && O.sound) { O.sound('slam', 0.9); O.sound('liar', 1); }
+        if (O && O.sound) { O.sound('slam', 0.9); O.sound('liar', 0.7); O.sound('quack', 0.7, duckPitch(s.id) * 0.85, 2); }
         break;
       }
       case 'reveal': {
-        // Würfel aller unter die Becher legen, dann alle Becher umdrehen
-        revealShownAt = performance.now() + 1500;
+        // Würfel aller unter die Becher legen, alle Becher umdrehen, dann passende Würfel reihum zählen
         const key = 'rv' + lastView.roundNo;
+        const plan = revealTiming(ev.actual);
+        const wild = lastView.reveal ? lastView.reveal.wildOnes : true;
+        const t0 = performance.now();
+        reveal = { t0, plan, key, ev };
+        countSprite.visible = false;
         let i = 0;
         seatOrder.forEach((s) => {
           const d = ev.dice[s.id];
           if (!d) return;
           s.cupRoot.visible = true;
           placeDice(s, d, key); s.diceRound = key;
-          animateReveal(s, 350 + i++ * 140);
+          animateReveal(s, 350 + i++ * 90);
         });
         setTimeout(() => {
-          if (!lastView) return;
-          highlight({ bid: ev.bid, wildOnes: lastView.reveal ? lastView.reveal.wildOnes : true }, true);
-          centerKey = ''; update(Object.assign({}, lastView, { expectAnim: false }));
-          if (O && O.sound) O.sound(ev.correct ? 'good' : 'bad', 0.8);
-        }, 1500 + i * 140);
+          if (!reveal || reveal.t0 !== t0) return;
+          const list = [];
+          seatOrder.forEach((s) => s.dice.forEach((m) => {
+            const ok = isMatch(m.userData.value, ev.bid.face, wild);
+            m.userData.dim = !ok;
+            m.material.forEach((mat) => { mat.color.setScalar(ok ? 1 : 0.4); mat.emissiveIntensity = 0; });
+            if (ok) list.push(m);
+          }));
+          if (!list.length) { paintCount({ num: 0, face: ev.bid.face }); if (O && O.sound) O.sound('count', 0.6, 0); }
+          list.forEach((m, k) => setTimeout(() => {
+            if (!reveal || reveal.t0 !== t0) return;
+            jumpDie(m);
+            paintCount({ num: k + 1, face: ev.bid.face });
+            if (O && O.sound) O.sound('count', 0.7, k);
+          }, k * plan.step));
+        }, plan.countStart);
+        setTimeout(() => {
+          if (!reveal || reveal.t0 !== t0) return;
+          showVerdict(ev);
+          if (O && O.sound) O.sound('verdict', 0.9, ev.correct);
+        }, plan.verdict);
         break;
       }
       case 'loseDie': {
         setTimeout(() => {
           const s = seats[ev.id]; if (!s) return;
-          const m = s.dice[s.dice.length - 1];
+          // Der verlorene Würfel fliegt in hohem Bogen vom Platz weg aufs Meer hinaus
+          const m = s.dice.filter((d) => d.visible).pop();
           if (m) {
             const from = m.position.clone();
-            addTween(900, 0, (p) => { m.position.set(from.x, from.y + p * 0.6, from.z); m.rotation.x += 0.2; m.rotation.z += 0.15; m.scale.setScalar(1 - p * 0.8); m.material.forEach((mm) => { mm.color.setRGB(1, 1 - p * 0.7, 1 - p * 0.7); }); }, () => { m.visible = false; });
+            const spin = 6 + Math.random() * 4;
+            addTween(1500, 0, (p) => {
+              m.position.set(from.x + p * 0.5, from.y + Math.sin(Math.PI * p * 0.8) * 1.3 + p * 0.3, from.z + p * 3.2);
+              m.rotation.x = p * spin; m.rotation.z = p * spin * 0.7;
+              m.material.forEach((mm) => { mm.color.setRGB(1, 1 - p * 0.6, 1 - p * 0.6); mm.transparent = true; mm.opacity = p < 0.75 ? 1 : 1 - (p - 0.75) / 0.25; });
+            }, () => { m.visible = false; });
           }
           pop('−1 🎲', s, '#ff8a7a');
-          if (O && O.sound) O.sound('lose', 0.7);
-        }, 2600);
+          s.nod = 1;
+          if (O && O.sound) { O.sound('lose', 0.7); O.sound('quack', 0.4, duckPitch(s.id) * 0.8, 1); }
+        }, afterVerdict(800));
         break;
       }
       case 'gainDie': {
-        setTimeout(() => { const s = seats[ev.id]; if (s) pop('+1 🎲', s, '#8aff9a'); }, 2600);
+        setTimeout(() => { const s = seats[ev.id]; if (s) { pop('+1 🎲', s, '#8aff9a'); s.flap = 1; } }, afterVerdict(800));
         break;
       }
       case 'out': {
-        setTimeout(() => { const s = seats[ev.id]; if (s) { pop('☠', s, '#ffffff'); s.out = true; } }, 3400);
+        setTimeout(() => { const s = seats[ev.id]; if (s) { pop('☠', s, '#ffffff'); s.out = true; } }, afterVerdict(2000));
         break;
       }
       case 'over': {
-        setTimeout(() => { const s = seats[ev.id]; if (s) goldBurst(s); if (O && O.sound) O.sound('win', 1); }, 3600);
+        setTimeout(() => {
+          const s = seats[ev.id]; if (!s) return;
+          s.cheer = true; goldBurst(s);
+          if (O && O.sound) { O.sound('win', 1); O.sound('quack', 0.6, duckPitch(s.id) * 1.1, 3); }
+        }, afterVerdict(2300));
         break;
       }
       default: break;
     }
   });
 }
+
+function smooth01(a, b, x) { const k = clamp((x - a) / (b - a), 0, 1); return k * k * (3 - 2 * k); }
+const _c1 = new THREE.Color(), _c2 = new THREE.Color();
+const SUN_DAY = new THREE.Color(0xffc890), SUN_DUSK = new THREE.Color(0xff6a38);
+const FOG_DAY = new THREE.Color(0xf0b58a), FOG_DUSK = new THREE.Color(0xc0604a), FOG_NIGHT = new THREE.Color(0x0e1426);
+const HEMI_DAY = new THREE.Color(0xffd8b0), HEMI_NIGHT = new THREE.Color(0x6a78b0);
+let nightApplied = -1, nightClock = 0;
+function updateNight(dt) {
+  const target = nightOverride !== null ? nightOverride : nightTarget;
+  const rdt = nightClock ? Math.min(2, (performance.now() - nightClock) / 1000) : 0; nightClock = performance.now();
+  nightCur += (target - nightCur) * (1 - Math.exp(-rdt * 0.45));
+  if (Math.abs(nightCur - nightApplied) < 0.0005) return;
+  nightApplied = nightCur;
+  const n = nightCur;
+  const elev = lerp(0.2, -0.14, smooth01(0, 0.85, n));
+  SUN_DIR.set(-0.72, elev, -0.66).normalize();
+  if (sky) sky.material.uniforms.night.value = n;
+  if (water) water.material.uniforms.night.value = n;
+  sunLight.position.copy(SUN_DIR).multiplyScalar(30);
+  sunLight.intensity = 2.6 * (1 - smooth01(0.4, 0.85, n));
+  sunLight.color.copy(SUN_DAY).lerp(SUN_DUSK, smooth01(0.15, 0.7, n));
+  moonLight.intensity = 0.75 * smooth01(0.55, 1, n);
+  hemiLight.intensity = lerp(0.9, 0.32, smooth01(0.2, 1, n));
+  hemiLight.color.copy(HEMI_DAY).lerp(HEMI_NIGHT, smooth01(0.3, 1, n));
+  fillLight.intensity = lerp(0.35, 0.18, n);
+  _c1.copy(FOG_DAY).lerp(FOG_DUSK, smooth01(0, 0.6, n)); _c1.lerp(FOG_NIGHT, smooth01(0.5, 1, n));
+  scene.fog.color.copy(_c1);
+  renderer.toneMappingExposure = lerp(1.05, 1.22, smooth01(0.4, 1, n));
+}
+let nightOverride = null;
+export function stats() { return { calls: renderer.info.render.calls, triangles: renderer.info.render.triangles }; }
+export function setNight(v) { nightOverride = v === null || v === undefined ? null : clamp(v, 0, 1); }
+
+function afterVerdict(extra) {
+  if (!reveal) return extra;
+  return Math.max(0, reveal.t0 + reveal.plan.verdict + extra - performance.now());
+}
+function duckPitch(id) { return 0.8 + ((hashStr(id) >>> 5) % 9) / 20; }
 
 function pop(text, s, color) {
   const cv = mkCanvas(384, 128); const c = cv.getContext('2d');
@@ -1553,8 +1790,9 @@ function tick() {
   }
   if (water) water.material.uniforms.time.value = t;
   fronds.forEach((f) => { f.obj.rotation.z = f.base + Math.sin(t * 1.3 + f.ph) * 0.05; f.obj.rotation.x = Math.sin(t * 0.9 + f.ph) * 0.03; });
-  torches.forEach((tc) => { const k = 1 + Math.sin(t * 17 + tc.ph) * 0.08 + Math.sin(t * 29 + tc.ph) * 0.06; tc.flame.scale.set(1, k, 1); tc.inner.scale.set(1, k * 0.95, 1); tc.glow.material.opacity = 0.55 + Math.sin(t * 13 + tc.ph) * 0.12; });
-  if (lanternLight) lanternLight.intensity = 2.0 + Math.sin(t * 11) * 0.15 + Math.sin(t * 23) * 0.1;
+  torches.forEach((tc) => { const k = 1 + Math.sin(t * 17 + tc.ph) * 0.08 + Math.sin(t * 29 + tc.ph) * 0.06; tc.flame.scale.set(1, k, 1); tc.inner.scale.set(1, k * 0.95, 1); tc.glow.material.opacity = (0.55 + Math.sin(t * 13 + tc.ph) * 0.12) * (1 + nightCur * 0.7); tc.glow.scale.setScalar((tc.baseScale || (tc.baseScale = tc.glow.scale.x)) * (1 + nightCur * 0.9)); });
+  if (lanternLight) lanternLight.intensity = (2.0 + Math.sin(t * 11) * 0.15 + Math.sin(t * 23) * 0.1) * (1 + nightCur * 1.8);
+  nightLights.forEach((l, k) => { l.intensity = 3.2 * smooth01(0.35, 0.9, nightCur) * (1 + Math.sin(t * 15 + k * 2) * 0.12); });
   ships.forEach((sh) => {
     sh.g.rotation.z = Math.sin(t * 0.6 + sh.bob) * 0.03;
     sh.g.rotation.x = Math.sin(t * 0.45 + sh.bob) * 0.02;
@@ -1580,6 +1818,13 @@ function tick() {
     gl.wl.rotation.z = fl; gl.wr.rotation.z = -fl;
   });
 
+  updateNight(dt);
+  if (countSprite && countSprite.visible) {
+    const k = 1 + 0.35 * Math.max(0, 1 - (now - (countSprite.userData.popT || 0)) / 260);
+    const w = (portraitMode ? 0.95 : 0.8) * k;
+    countSprite.scale.set(w, w * 288 / 512, 1);
+  }
+
   const v = lastView;
   // Sitze / Figuren
   seatOrder.forEach((s) => {
@@ -1589,8 +1834,22 @@ function tick() {
     s.peek += (wantPeek - s.peek) * Math.min(1, dt * 9);
     if (!s.anim && P.flip < 0.01) { P.tilt = s.peek * PEEK_ANGLE * (s.isMe ? 1 : 0.8); applyPose(s); }
     s.hold += (s.holdTarget - s.hold) * Math.min(1, dt * 8);
-    // Zug-Ring
-    s.ring.material.opacity = s.turn ? 0.45 + Math.sin(t * 5) * 0.3 : 0;
+    // Zug-Ring: bei Zeitlimit als ablaufender Kreis um den Becher, sonst pulsierend
+    const prog = s.turn ? turnProgress(v) : null;
+    if (prog !== null) {
+      const rk = Math.round(prog * 90);
+      if (s.ringKey !== rk) {
+        s.ringKey = rk;
+        s.ring.geometry.dispose();
+        s.ring.geometry = new THREE.RingGeometry(0.2, 0.245, 48, 1, Math.PI / 2, Math.max(0.001, prog) * Math.PI * 2);
+        s.ring.material.color.set(prog < 0.27 ? 0xff5a3a : 0xf4c95d);
+      }
+      s.ring.material.opacity = 0.85;
+      const pl = v.players.find((q) => q.id === s.id); if (pl) updateLabel(s, pl, v);
+    } else {
+      if (s.ringKey !== 'full') { s.ringKey = 'full'; s.ring.geometry.dispose(); s.ring.geometry = new THREE.RingGeometry(0.2, 0.235, 48); s.ring.material.color.set(0xf4c95d); }
+      s.ring.material.opacity = s.turn ? 0.45 + Math.sin(t * 5) * 0.3 : 0;
+    }
     // Würfel beim Aufdecken leuchten lassen
     s.dice.forEach((m) => { if (m.userData.match) m.material.forEach((mat) => { mat.emissiveIntensity = 0.35 + Math.sin(t * 5) * 0.2; }); });
     // Sprechblasen
@@ -1609,9 +1868,19 @@ function tick() {
       s.lookCur += (targetYaw - s.lookCur) * Math.min(1, dt * 4);
       s.nod = Math.max(0, s.nod - dt * 1.6);
       const nodA = Math.sin((1 - s.nod) * Math.PI * 2) * s.nod * 0.25;
-      parts.head.rotation.set(0.1 + s.peek * 0.55 + nodA + (s.out ? 0.5 : 0), s.lookCur * (1 - s.peek * 0.8), 0);
-      parts.torso.rotation.x = -(s.peek * 0.22) - (s.slam > 0 ? Math.sin(s.slam * Math.PI) * 0.18 : 0) + (s.out ? 0.25 : 0) - Math.sin(t * 1.4 + s.idx) * 0.012;
+      const shake = s.flap > 0 ? Math.sin(t * 30) * 0.25 * s.flap : 0;
+      parts.head.rotation.set(0.1 + s.peek * 0.55 + nodA + (s.out ? 0.85 : 0) - (s.cheer ? 0.35 : 0), s.lookCur * (1 - s.peek * 0.8) + shake, s.out ? 0.2 : Math.sin(t * 0.5 + s.idx * 1.3) * 0.08);
+      parts.torso.rotation.x = -(s.peek * 0.22) - (s.slam > 0 ? Math.sin(s.slam * Math.PI) * 0.18 : 0) + (s.out ? 0.35 : 0) - Math.sin(t * 1.4 + s.idx) * 0.012;
+      parts.body.position.y = 0.48 + (s.cheer ? Math.abs(Math.sin(t * 7 + s.idx)) * 0.08 : 0);
+      // Blinzeln
+      if (parts.eyes) {
+        if (!s.nextBlink) s.nextBlink = now + 1000 + Math.random() * 3000;
+        const closed = now > s.nextBlink && now < s.nextBlink + 130;
+        if (now > s.nextBlink + 130) s.nextBlink = now + 2000 + Math.random() * 3500;
+        parts.eyes.forEach((e) => { e.m.scale.y = closed || s.out ? e.sy * 0.12 : e.sy; });
+      }
     }
+    s.flap = Math.max(0, (s.flap || 0) - dt / 1.3);
     s.slam = Math.max(0, s.slam - dt * 1.8);
     // Arme: rechte Hand am Becher (oder in Ruhe), linke Hand auf dem Tisch
     const torsoLean = s.isMe ? 0 : (parts.torso ? parts.torso.rotation.x : 0);
@@ -1624,11 +1893,21 @@ function tick() {
     const g = gripWorld(s); _tmp.copy(g); parts.g.worldToLocal(_tmp);
     const hold = s.cupRoot.visible ? s.hold : 0;
     _tmp2.copy(_rest).lerp(_tmp, hold);
-    solveArm(parts.arms[0], _shoulderR, _tmp2);
     // linke Hand (beim "Lügner!" auf den Tisch hauen)
     _rest.set(-0.2, TABLE_Y + 0.03 + (s.slam > 0 ? Math.sin(s.slam * Math.PI) * 0.25 : 0), edge - 0.1);
+    // Flügelschlagen (Lügner!, Sieg) bzw. hängende Flügel (ausgeschieden)
+    const flapEnv = s.cheer ? 1 : (s.flap > 0 ? Math.min(1, (1 - s.flap) * 5) * Math.min(1, s.flap * 3) : 0);
+    if (!s.isMe && (flapEnv > 0 || s.out)) {
+      const fr = s.cheer ? 14 : 26;
+      const wy = s.out ? -0.35 : 0.2 + Math.sin(t * fr) * 0.1;
+      _v1.set(0.33, wy, s.out ? 0.02 : -0.08).add(_shoulderR);
+      _v2.set(-0.33, wy, s.out ? 0.02 : -0.08).add(_shoulderL);
+      const k = s.out ? 1 : flapEnv;
+      _tmp2.lerp(_v1, k); _rest.lerp(_v2, k);
+    }
+    solveArm(parts.arms[0], _shoulderR, _tmp2);
     solveArm(parts.arms[1], _shoulderL, _rest);
-    parts.arms.forEach((a) => { a.fore.visible = a.cuff.visible = a.hand.visible = !s.out; a.upper.visible = !s.out && !s.isMe; });
+    parts.arms.forEach((a) => { const vis = !(s.isMe && s.out); a.fore.visible = a.cuff.visible = a.hand.visible = vis; a.upper.visible = vis && !s.isMe; });
   });
 
   // Kamera: Ich-Perspektive am eigenen Platz
@@ -1636,7 +1915,15 @@ function tick() {
   if (me) {
     const wantLean = myPeek && canPeek(me) ? 1 : 0;
     peekBlend += (wantLean - peekBlend) * Math.min(1, dt * 6);
-    const eye = _tmp.set(0, 1.3, 0.12);
+    // Automatisch sanft zur Person drehen, die gerade dran ist (außer man schaut sich selbst um)
+    if (now - lastManualLook > 5000 && peekBlend < 0.05) {
+      let ay = 0;
+      const ts = v.gamePhase === 'bidding' && v.currentTurnId && v.currentTurnId !== v.meId ? seats[v.currentTurnId] : null;
+      if (ts) { _v3.copy(ts.frame.position); me.frame.worldToLocal(_v3); ay = clamp(Math.atan2(-_v3.x, -_v3.z) * 0.55, -0.85, 0.85); }
+      yaw += (ay - yaw) * Math.min(1, dt * 1.1);
+      pitch += (basePitch - pitch) * Math.min(1, dt * 1.1);
+    }
+    const eye = portraitMode ? _tmp.set(0, 1.78, 0.02) : _tmp.set(0, 1.42, 0.3);
     me.frame.localToWorld(eye);
     _e.set(pitch, me.rot + yaw, 0, 'YXZ');
     _q1.setFromEuler(_e);
@@ -1674,4 +1961,18 @@ export function dispose() {
   if (renderer) { renderer.setAnimationLoop(null); renderer.dispose(); }
   if (ro) ro.disconnect();
   if (canvas && canvas.parentNode) canvas.parentNode.removeChild(canvas);
+}
+
+// Nur für Tests: Meshes pro Oberobjekt zählen
+export function debugCounts() {
+  const out = {};
+  scene.children.forEach((c, i) => {
+    let n = 0; c.traverse((o) => { if ((o.isMesh || o.isSprite) && o.visible) n++; });
+    const k = (c.type || 'x') + (c.userData.dynamic ? '*' : '');
+    out[k] = (out[k] || 0) + n;
+  });
+  const seat = Object.values(seats)[1];
+  let sn = 0; if (seat) seat.frame.traverse((o) => { if (o.isMesh) sn++; });
+  out.perSeatFrame = sn;
+  return out;
 }

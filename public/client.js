@@ -23,7 +23,7 @@
   let soundOn = safeGet(SOUND_KEY) !== 'off';
   let peeking = false;
   let peekMap = {};           // playerId -> true (schaut gerade nach)
-  let sel = { qty: 1, face: 2, key: null };
+  let sel = { qty: 1, face: 2, key: null, custom: false, sending: false };
   let dismissedResult = null;
   let notifiedTurnKey = null;
   let revealBannerAt = 0;
@@ -77,8 +77,36 @@
     lose() { tone(300, 0.12, 0, 0.1); tone(200, 0.2, 0.1, 0.1); },
     turn() { tone(660, 0.1, 0, 0.12); tone(880, 0.12, 0.1, 0.12); },
     win() { [523, 659, 784, 1046, 1318].forEach((f, i) => tone(f, 0.25, i * 0.11, 0.13, 'triangle')); },
+    count(v, i) { tone(420 + Math.min(i || 0, 20) * 38, 0.09, 0, 0.1 * v, 'triangle'); },
+    verdict(v, good) { if (good) [523, 784, 1046].forEach((f, k) => tone(f, 0.22, k * 0.09, 0.12 * v, 'triangle')); else { tone(233, 0.35, 0, 0.13 * v, 'sawtooth'); tone(175, 0.5, 0.18, 0.13 * v, 'sawtooth'); } },
+    hurry(v) { tone(880, 0.05, 0, 0.06 * v, 'square'); },
+    // Entenquaken: Sägezahn mit Tonhöhen-Fall durch zwei Formant-Filter, Tonlage je Ente
+    quack(v, pitch, times) {
+      if (!soundOn) return;
+      try {
+        const c = ctx(); const p = pitch || 1; const n = times || 1;
+        for (let k = 0; k < n; k++) {
+          const t0 = c.currentTime + k * 0.2;
+          const o = c.createOscillator(); o.type = 'sawtooth';
+          o.frequency.setValueAtTime(330 * p, t0); o.frequency.exponentialRampToValueAtTime(190 * p, t0 + 0.18);
+          const f1 = c.createBiquadFilter(); f1.type = 'bandpass'; f1.frequency.value = 1050 * p; f1.Q.value = 4;
+          const f2 = c.createBiquadFilter(); f2.type = 'bandpass'; f2.frequency.value = 2300 * p; f2.Q.value = 6;
+          const g = c.createGain(); const g2 = c.createGain(); g2.gain.value = 0.5;
+          g.gain.setValueAtTime(0, t0); g.gain.linearRampToValueAtTime(0.5 * v, t0 + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.22);
+          o.connect(f1).connect(g); o.connect(f2).connect(g2).connect(g); g.connect(c.destination);
+          o.start(t0); o.stop(t0 + 0.25);
+        }
+      } catch (e) { /* kein Audio */ }
+    },
   };
-  function sound(name, vol) { if (sfx[name]) sfx[name](vol === undefined ? 1 : vol); }
+  function sound(name, vol, a, b) { if (sfx[name]) sfx[name](vol === undefined ? 1 : vol, a, b); }
+  // Zeitplan des Aufdeckens (muss zu table3d.js passen): Becher umkippen, dann reihum zählen
+  function revealTiming(actual) {
+    const step = Math.max(180, Math.min(380, 2600 / Math.max(1, actual)));
+    const countStart = 1600;
+    const countEnd = countStart + actual * step;
+    return { step, countStart, countEnd, verdict: countEnd + 350, banner: countEnd + 1300 };
+  }
   // Meeresrauschen im Hintergrund
   function startWaves() {
     if (!soundOn || waves) return;
@@ -222,9 +250,9 @@
   $('btn-fill-bots').addEventListener('click', () => socket.emit('fillBots'));
   $('btn-start').addEventListener('click', () => socket.emit('startGame'));
   function sendSettings() {
-    socket.emit('setSettings', { dice: Number($('set-dice').value), wildOnes: $('set-wild').checked, spotOn: $('set-spot').checked });
+    socket.emit('setSettings', { dice: Number($('set-dice').value), wildOnes: $('set-wild').checked, spotOn: $('set-spot').checked, turnSec: Number($('set-turn').value) });
   }
-  ['set-dice', 'set-wild', 'set-spot'].forEach((id) => $(id).addEventListener('change', sendSettings));
+  ['set-dice', 'set-wild', 'set-spot', 'set-turn'].forEach((id) => $(id).addEventListener('change', sendSettings));
 
   ['btn-show-rules', 'btn-show-rules-lobby'].forEach((id) => $(id).addEventListener('click', () => show($('rules-modal'))));
   $('btn-close-rules-modal').addEventListener('click', () => hide($('rules-modal')));
@@ -266,7 +294,7 @@
   socket.on('yourDice', (data) => {
     const changed = !myDice || data.round !== myDice.round || JSON.stringify(data.dice) !== JSON.stringify(myDice.dice);
     myDice = data || myDice;
-    if (changed && latestState) { renderPeekHud(); sync3d(); renderFlat(latestState); }
+    if (changed && latestState) { renderPeekHud(); sync3d(); renderFlat(latestState); if (latestState.phase === 'playing') renderControls(latestState); }
   });
   socket.on('actionError', (d) => toast(d.error));
   socket.on('peek', (d) => {
@@ -277,8 +305,10 @@
   });
   socket.on('look', (d) => { if (b3 && d) b3.setLook(d.id, d.yaw); });
 
+  let prevStateForFreeze = null;
   socket.on('gameState', (state) => {
     const prev = latestState;
+    prevStateForFreeze = prev;
     latestState = state;
     // Gucken-Status aus dem Zustand übernehmen
     peekMap = {};
@@ -298,8 +328,13 @@
 
   function handleEvents(state, fresh) {
     fresh.forEach((ev) => {
-      if (ev.t === 'reveal') { revealBannerAt = Date.now() + 1500; }
-      if (ev.t === 'over') { resultAt = Date.now() + 4800; }
+      if (ev.t === 'reveal' && prevStateForFreeze) {
+        const counts = {}; prevStateForFreeze.players.forEach((p) => { counts[p.id] = p.dice; });
+        const rt0 = revealTiming(ev.actual);
+        crewFreeze = { until: Date.now() + (b3 && mode3d ? rt0.banner - 300 : 1500), counts, total: prevStateForFreeze.totalDice };
+        setTimeout(() => { if (latestState) { renderCrew(latestState); renderGame(latestState); } }, crewFreeze.until - Date.now() + 30);
+      }
+      if (ev.t === 'reveal') { const rt = revealTiming(ev.actual); revealBannerAt = Date.now() + (b3 && mode3d ? rt.banner : 1500); resultAt = Date.now() + (b3 && mode3d ? rt.banner + 2600 : 4800); }
       if (!b3 || !mode3d) {
         // ohne 3D die Töne hier abspielen
         if (ev.t === 'roll') { for (let i = 0; i < 6; i++) setTimeout(() => sound('rattle', 0.8), i * 110); setTimeout(() => sound('slam'), 800); }
@@ -330,7 +365,8 @@
 
   function renderGame(state) {
     $('game-code').textContent = state.code;
-    $('round-badge').innerHTML = state.roundNo ? `Runde ${state.roundNo}<span class="extra"> · ${state.totalDice} Würfel am Tisch</span>` : '';
+    const shownTotal = crewFreeze && Date.now() < crewFreeze.until ? crewFreeze.total : state.totalDice;
+    $('round-badge').innerHTML = state.roundNo ? `Runde ${state.roundNo}<span class="extra"> · ${shownTotal} Würfel am Tisch</span>` : '';
     renderCrew(state);
     renderControls(state);
     renderBanner(state);
@@ -377,9 +413,10 @@
       if (document.activeElement !== $('set-dice')) $('set-dice').value = String(st.dice);
       $('set-wild').checked = st.wildOnes;
       $('set-spot').checked = st.spotOn;
+      if (document.activeElement !== $('set-turn')) $('set-turn').value = String(st.turnSec);
     } else {
       hide($('lobby-settings')); show($('lobby-settings-display'));
-      $('lobby-settings-display').textContent = `${st.dice} Würfel pro Person · Einsen als Joker: ${st.wildOnes ? 'ja' : 'nein'} · „Genau!“: ${st.spotOn ? 'ja' : 'nein'}`;
+      $('lobby-settings-display').textContent = `${st.dice} Würfel pro Person · Einsen als Joker: ${st.wildOnes ? 'ja' : 'nein'} · „Genau!“: ${st.spotOn ? 'ja' : 'nein'} · ${st.turnSec ? `${st.turnSec} s pro Zug` : 'ohne Zeitlimit'}`;
     }
     const startBtn = $('btn-start'); const status = $('lobby-status');
     if (isHost) {
@@ -405,6 +442,9 @@
   }
 
   // ----- Crew-Übersicht -----
+  // Während des Aufdeckens die alten Würfelzahlen zeigen, damit das Ergebnis nicht vorher verraten wird
+  let crewFreeze = null; // { until, counts: {id: n}, total }
+  function frozenDice(p) { return crewFreeze && Date.now() < crewFreeze.until && crewFreeze.counts[p.id] !== undefined ? crewFreeze.counts[p.id] : p.dice; }
   function renderCrew(state) {
     const list = $('crew-list'); list.innerHTML = '';
     state.players.forEach((p) => {
@@ -415,7 +455,8 @@
       const kids = [el('span', { class: 'nm', text: (p.isBot ? '🤖 ' : '') + p.name, title: p.name })];
       const right = el('span', { class: 'dice' });
       if (peekMap[p.id] || (p.id === myId() && peeking)) right.appendChild(el('span', { class: 'peek', text: '👀 ' }));
-      right.appendChild(document.createTextNode(p.eliminated ? '☠' : `🎲 ${p.dice}`));
+      const fd = frozenDice(p);
+      right.appendChild(document.createTextNode(p.eliminated && fd === 0 ? '☠' : `🎲 ${fd}`));
       kids.push(right);
       list.appendChild(el('li', { class: cls.join(' ') }, kids));
     });
@@ -486,7 +527,7 @@
     if (state.phase === 'gameover') {
       status.appendChild(el('span', { html: `🏆 <b>${escapeHtml(pname(state, state.winnerId))}</b> gewinnt Liar's Dice!` }));
     } else if (state.gamePhase === 'reveal') {
-      status.appendChild(el('span', { text: 'Die Becher sind oben – gleich geht’s weiter …' }));
+      status.appendChild(el('span', { text: 'Aufgedeckt – es wird gezählt …' }));
     } else if (me && me.eliminated) {
       status.appendChild(el('span', { text: '☠ Du hast keine Würfel mehr – du schaust zu.' }));
       bidFrag().forEach((n) => status.appendChild(n));
@@ -494,41 +535,48 @@
       status.appendChild(el('span', { text: '🎲 Alle schütteln ihre Becher …' }));
       setTimeout(() => { if (latestState === state) { state.rollMs = 0; renderControls(state); sync3d(false); } }, state.rollMs + 30);
     } else if (myTurn) {
-      status.appendChild(el('span', { text: state.bid ? 'Du bist dran – höher bieten oder „Lügner!“ rufen.' : 'Du eröffnest – gib das erste Gebot ab.' }));
+      status.appendChild(el('span', { text: state.bid ? 'Du bist dran – höher bieten oder „Lügner!“ rufen.' : 'Du eröffnest – tipp auf eine Würfelseite.' }));
       bidFrag().forEach((n) => status.appendChild(n));
     } else if (state.currentTurnId) {
       status.appendChild(el('span', { html: `<b>${escapeHtml(pname(state, state.currentTurnId))}</b> überlegt …` }));
       bidFrag().forEach((n) => status.appendChild(n));
     }
+    status.appendChild(el('span', { class: 'secs', id: 'turn-secs' }));
 
-    const showBid = myTurn && !rolling && state.canRaise;
+    const canBid = myTurn && !rolling && state.canRaise;
     const showCall = myTurn && !rolling && !!state.bid;
-    $('bid-controls').classList.toggle('hidden', !showBid);
+    const key = `${state.roundNo}:${state.turnNo}`;
+    if (sel.key !== key) {
+      sel.key = key; sel.custom = false; sel.sending = false;
+      const m = state.minRaise || { qty: 1, face: 2 };
+      sel.face = m.face; sel.qty = m.qty;
+    }
+    $('quick-bids').classList.toggle('hidden', !canBid || sel.custom);
+    $('bid-controls').classList.toggle('hidden', !canBid || !sel.custom);
+    $('btn-custom').classList.toggle('hidden', !canBid);
+    $('btn-custom').textContent = sel.custom ? '⚡ Schnell bieten' : '✎ Anderes Gebot';
     $('call-controls').classList.toggle('hidden', !showCall);
     $('btn-spot').classList.toggle('hidden', !state.settings.spotOn);
-    if (showBid) {
-      const key = `${state.roundNo}:${state.turnNo}`;
-      if (sel.key !== key) {
-        sel.key = key;
-        const m = state.minRaise || { qty: 1, face: 2 };
-        // Vorschlag: gleiche Augenzahl wie zuletzt, eins mehr – sonst das kleinste Gebot
-        sel.face = m.face; sel.qty = m.qty;
-      }
-      renderBidPicker(state);
-    }
-    // Host: Überspringen / Weiter
+    if (canBid) { if (sel.custom) renderBidPicker(state); else renderQuickBids(state); }
+
+    // Host: Nächste Runde / Überspringen (Überspringen nur ohne Zeitlimit nötig)
     const hc = $('host-controls'); hc.innerHTML = '';
     const isHost = state.hostId === myId();
     if (isHost && state.gamePhase === 'reveal' && state.phase === 'playing') {
       hc.appendChild(el('button', { class: 'btn small', text: '⏭ Nächste Runde', onclick: () => socket.emit('nextRound') }));
     }
     const w = state.waiting;
-    if (w && isHost && !w.ids.includes(myId())) {
+    if (w && isHost && !w.ids.includes(myId()) && !state.turnMs) {
       const b = el('button', { class: 'btn ghost small hidden', id: 'btn-skip', text: '⏭ Überspringen', onclick: () => socket.emit('skipTurn') });
       hc.appendChild(b);
       skipWaitBase = { at: Date.now(), ms: w.elapsedMs };
       updateSkipBtn();
     }
+    // Zug-Timer
+    turnClock = state.turnMs && state.currentTurnId ? { deadline: Date.now() + state.turnMsLeft, total: state.turnMs, mine: myTurn, key } : null;
+    updateTurnClock();
+    // "Du bist dran": Bildschirmrand leuchtet kurz auf
+    if (myTurn && !rolling && flashKey !== key) { flashKey = key; flashEdge('flash'); }
   }
   let skipWaitBase = null;
   function updateSkipBtn() {
@@ -538,6 +586,68 @@
     b.classList.toggle('hidden', elapsed < 25000);
   }
   setInterval(updateSkipBtn, 1000);
+
+  // ----- Zug-Timer (Leiste oben an der Steuerung + Sekunden + Rand-Warnung) -----
+  let turnClock = null; let flashKey = null; let hurryTick = -1;
+  function flashEdge(cls) {
+    const f = $('turn-flash');
+    f.classList.remove('flash', 'hurry');
+    void f.offsetWidth; // Animation neu starten
+    f.classList.add(cls);
+  }
+  function updateTurnClock() {
+    const bar = $('turn-timer'); const secs = $('turn-secs'); const f = $('turn-flash');
+    if (!turnClock) { hide(bar); if (secs) secs.textContent = ''; f.classList.remove('hurry'); return; }
+    const left = Math.max(0, turnClock.deadline - Date.now());
+    const frac = Math.min(1, left / turnClock.total);
+    show(bar);
+    const i = bar.firstChild;
+    i.style.width = (frac * 100).toFixed(1) + '%';
+    bar.classList.toggle('low', left < 8000);
+    if (secs) secs.textContent = ` · ${Math.ceil(left / 1000)} s`;
+    if (turnClock.mine && left < 8000 && left > 0) {
+      if (!f.classList.contains('hurry')) f.classList.add('hurry');
+      const s = Math.ceil(left / 1000);
+      if (s !== hurryTick) { hurryTick = s; sound('hurry', 0.8); if (s <= 3) vibrate(40); }
+    } else f.classList.remove('hurry');
+  }
+  setInterval(updateTurnClock, 200);
+
+  // ----- Schnell bieten: pro Augenzahl das kleinste erlaubte Gebot, ein Tipp bietet -----
+  function openingQty(state, f) {
+    // Eröffnung: Vorschlag aus den eigenen Würfeln (eigene Treffer + vorsichtige Schätzung der anderen)
+    const dice = myDice && myDice.round === state.roundNo ? myDice.dice : [];
+    const own = dice.filter((d) => d === f || (state.settings.wildOnes && d === 1 && f !== 1)).length;
+    const p = state.settings.wildOnes && f !== 1 ? 1 / 3 : 1 / 6;
+    return Math.max(1, Math.min(state.totalDice, own + Math.floor((state.totalDice - dice.length) * p * 0.6)));
+  }
+  function sendBid(qty, face) {
+    if (sel.sending) return;
+    sel.sending = true;
+    socket.emit('bid', { qty, face }, (res) => { sel.sending = false; if (res && !res.ok) toast(res.error); });
+  }
+  function renderQuickBids(state) {
+    const box = $('quick-bids'); box.innerHTML = '';
+    const minFace = state.settings.wildOnes ? 2 : 1;
+    const b = state.bid;
+    for (let f = minFace; f <= 6; f++) {
+      const q = b ? minQtyFor(state, f) : openingQty(state, f);
+      if (q > state.totalDice) continue;
+      let hint = '';
+      if (b && f === b.face) hint = '+1';
+      else if (b && f === b.face + 1) hint = 'gleich viele';
+      const btn = el('button', { class: 'quick-bid' + (hint ? ' hint' : ''), type: 'button', title: `Biete ${q} × ${f}er` }, [
+        el('span', { class: 'q', text: `${q}×` }), dieEl(f),
+      ]);
+      if (hint) btn.appendChild(el('span', { class: 'tag-hint', text: hint }));
+      btn.addEventListener('click', () => sendBid(q, f));
+      box.appendChild(btn);
+    }
+  }
+  $('btn-custom').addEventListener('click', () => {
+    sel.custom = !sel.custom;
+    if (latestState) renderControls(latestState);
+  });
 
   function renderBidPicker(state) {
     const minFace = state.settings.wildOnes ? 2 : 1;
@@ -566,9 +676,7 @@
   }
   $('qty-minus').addEventListener('click', () => { if (!latestState) return; sel.qty--; renderBidPicker(latestState); });
   $('qty-plus').addEventListener('click', () => { if (!latestState) return; sel.qty++; renderBidPicker(latestState); });
-  $('btn-bid').addEventListener('click', () => {
-    socket.emit('bid', { qty: sel.qty, face: sel.face }, (res) => { if (res && !res.ok) toast(res.error); });
-  });
+  $('btn-bid').addEventListener('click', () => sendBid(sel.qty, sel.face));
   $('btn-liar').addEventListener('click', () => socket.emit('callLiar', null, (res) => { if (res && !res.ok) toast(res.error); }));
   $('btn-spot').addEventListener('click', () => socket.emit('callSpot', null, (res) => { if (res && !res.ok) toast(res.error); }));
 
@@ -667,6 +775,7 @@
         sound,
       });
       b3 = m;
+      window.__liarsDice3d = m; // für Tests/Debugging
       m.setVisible(!$('screen-game').classList.contains('hidden'));
       sync3d(false);
       if (peeking) m.setMyPeek(true);
@@ -691,7 +800,12 @@
       myDice: myDice ? myDice.dice : null,
       myDiceRound: myDice ? myDice.round : -1,
       expectAnim: !!expectAnim,
-      peekSeq: 0,
+      totalDice: s.totalDice,
+      startDice: s.startDice,
+      phase: s.phase,
+      winnerId: s.winnerId,
+      turnDeadline: s.turnMs ? Date.now() + s.turnMsLeft : 0,
+      turnMs: s.turnMs || 0,
     });
   }
   mode3d = webglOk();

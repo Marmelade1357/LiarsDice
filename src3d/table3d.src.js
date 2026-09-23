@@ -301,6 +301,7 @@ function buildWater() {
       }`,
     fragmentShader: `
       uniform float time; uniform vec3 sunDir; uniform vec3 moonDir; uniform float night; varying vec3 vPos; varying float vH;
+      float coast(float a){ return 1.0 + 0.06*sin(3.0*a+0.7) + 0.04*sin(5.0*a+2.1) + 0.025*sin(8.0*a+4.0); }
       void main(){
         float n1 = smoothstep(0.0, 0.6, night), n2 = smoothstep(0.5, 1.0, night);
         vec3 dx = dFdx(vPos); vec3 dy = dFdy(vPos);
@@ -316,10 +317,16 @@ function buildWater() {
         n = normalize(n + vec3(g.x, 0.0, g.y) * fade);
         vec3 v = normalize(cameraPosition - vPos);
         float fres = pow(1.0 - max(dot(n, v), 0.0), 3.0);
+        float ang = atan(vPos.z, vPos.x);
+        float cf = coast(ang);
         float d = length(vPos.xz);
+        float dc = d / cf; // Abstand relativ zur Küstenlinie
         vec3 deep = mix(vec3(0.03,0.16,0.28), vec3(0.01,0.035,0.08), n2);
         vec3 shallow = mix(vec3(0.12,0.62,0.62), vec3(0.03,0.13,0.18), n2);
-        vec3 col = mix(shallow, deep, smoothstep(11.5, 26.0, d));
+        vec3 col = mix(shallow, deep, smoothstep(11.5, 26.0, dc));
+        // Riff-Flecken im flachen Wasser
+        float reef = sin(vPos.x*0.9 + sin(vPos.z*0.7)*1.5) * sin(vPos.z*1.1 + sin(vPos.x*0.5)*1.3);
+        col = mix(col, col * vec3(0.72, 0.85, 0.8), smoothstep(0.35, 0.8, reef) * (1.0 - smoothstep(12.5, 19.0, dc)) * 0.6 * (1.0 - n2));
         vec3 hz = mix(mix(vec3(1.0,0.7,0.5), vec3(0.9,0.4,0.25), n1), vec3(0.07,0.09,0.18), n2);
         vec3 up = mix(vec3(0.45,0.55,0.75), vec3(0.03,0.05,0.13), n2);
         vec3 skyc = mix(hz, up, clamp(v.y*3.0,0.0,1.0));
@@ -330,8 +337,12 @@ function buildWater() {
         float mo = max(dot(r, moonDir), 0.0);
         col += vec3(0.75,0.82,1.0) * (pow(mo, 120.0) * 1.6 + pow(mo, 16.0) * 0.08) * n2;
         // Schaum an der Küste
-        float shore = 1.0 - smoothstep(0.0, 1.4, abs(d - 11.3 - sin(time*0.8 + atan(vPos.z, vPos.x)*7.0)*0.25));
-        float foam = shore * (0.55 + 0.45*sin(d*6.0 - time*2.5));
+        float swash = sin(time*0.8 + ang*7.0)*0.25;
+        float shore = 1.0 - smoothstep(0.0, 1.2, abs(dc - 11.3 - swash/cf) * cf);
+        float foam = shore * (0.55 + 0.45*sin(dc*6.0 - time*2.5));
+        // zweite, schwächere Brandungslinie weiter draußen
+        float outer = 1.0 - smoothstep(0.0, 0.35, abs(dc - 13.2 - sin(time*0.6 + ang*5.0)*0.35));
+        foam += outer * 0.35 * (0.5 + 0.5*sin(ang*23.0 + time*0.7));
         foam += smoothstep(0.13, 0.2, vH) * 0.35 * (1.0 - smoothstep(30.0, 90.0, d));
         col = mix(col, mix(vec3(0.95,0.97,0.95), vec3(0.35,0.4,0.5), n2), clamp(foam, 0.0, 0.9));
         // Dunst am Horizont
@@ -346,6 +357,15 @@ function buildWater() {
   scene.add(water);
 }
 
+// Unregelmäßige Küstenlinie: Radius-Faktor je Richtung (gleiche Formel im Wasser-Shader)
+function coast(a) { return 1 + 0.06 * Math.sin(3 * a + 0.7) + 0.04 * Math.sin(5 * a + 2.1) + 0.025 * Math.sin(8 * a + 4.0); }
+function sandY(x, z) {
+  const r = Math.hypot(x, z);
+  if (r < 4.2) return 0;
+  const c = 1 + (coast(Math.atan2(z, x)) - 1) * THREE.MathUtils.smoothstep(r, 4.4, 9.3);
+  const k = r / (14 * c);
+  return -1.5 + 1.5 * Math.sqrt(Math.max(0, 1 - k * k));
+}
 function buildIsland() {
   const sandTex = sandTexture();
   const sand = std(0xffffff, 1, { map: sandTex, vertexColors: true });
@@ -354,14 +374,15 @@ function buildIsland() {
   const pos = geo.attributes.position;
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
-    const k = 1 + (Math.sin(x * 13) * Math.cos(z * 11) * 0.02 + Math.sin(x * 29 + z * 17) * 0.008) * (1 - y);
+    const cw = 1 - THREE.MathUtils.smoothstep(y, 0.75, 0.95);
+    const k = (1 + (coast(Math.atan2(z, x)) - 1) * cw) * (1 + (Math.sin(x * 13) * Math.cos(z * 11) * 0.02 + Math.sin(x * 29 + z * 17) * 0.008) * (1 - y));
     pos.setXYZ(i, x * k, y + (Math.sin(x * 9 + z * 4) * 0.012 + Math.sin(z * 15 - x * 6) * 0.006) * (1 - y) * (y < 0.95 ? 1 : 0), z * k);
   }
   geo.computeVertexNormals();
   // nasser, dunklerer Sand zur Wasserkante hin (Radius im skalierten Modell ~ 10.3..11.5)
   const col = new Float32Array(pos.count * 3);
   for (let i = 0; i < pos.count; i++) {
-    const r = Math.hypot(pos.getX(i), pos.getZ(i)) * 14;
+    const r = Math.hypot(pos.getX(i), pos.getZ(i)) * 14 / coast(Math.atan2(pos.getZ(i), pos.getX(i)));
     const wet = THREE.MathUtils.smoothstep(r, 9.6, 11.0);
     const dry = 1 - wet * 0.42;
     col[i * 3] = dry; col[i * 3 + 1] = dry * (1 - wet * 0.02); col[i * 3 + 2] = dry * (1 - wet * 0.05);
@@ -374,7 +395,6 @@ function buildIsland() {
   // flacher Sandbereich unter dem Tisch, damit alles eben steht
   const flat = mesh(new THREE.CircleGeometry(4.2, 64), std(0xffffff, 1, { map: sandTex }), false, true);
   flat.rotation.x = -Math.PI / 2; flat.position.y = 0.002; scene.add(flat);
-  const sandY = (x, z) => { const r = Math.hypot(x, z); return r < 4.2 ? 0 : -1.5 + 1.5 * Math.sqrt(Math.max(0, 1 - (r / 14) * (r / 14))); };
 
   // Felsen am Strand und im Wasser
   const rockMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92 });
@@ -427,6 +447,20 @@ function buildIsland() {
   drift.position.set(6.4, sandY(6.4, 5.6) - 0.02, 5.6); drift.rotation.y = 2.2; scene.add(drift);
   const drift2 = mesh(S.driftwoodGeometry(9), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95 }));
   drift2.position.set(-8.6, sandY(-8.6, -4.4) - 0.02, -4.4); drift2.rotation.y = 0.7; drift2.scale.setScalar(0.8); scene.add(drift2);
+  // Tanglinie: angespülter Seetang knapp oberhalb der Wasserkante
+  const weedGeo = new THREE.CircleGeometry(0.12, 7); weedGeo.rotateX(-Math.PI / 2);
+  const weedMat = new THREE.MeshStandardMaterial({ color: 0x5a6130, roughness: 0.9 });
+  const weeds = new THREE.InstancedMesh(weedGeo, weedMat, 70);
+  const wm = new THREE.Matrix4(), wq = new THREE.Quaternion(), ws = new THREE.Vector3(), wp = new THREE.Vector3();
+  for (let i = 0; i < 70; i++) {
+    const a = (i / 70) * Math.PI * 2 + Math.sin(i * 7.3) * 0.04;
+    const r = 10.4 * coast(a) + Math.sin(i * 3.7) * 0.15;
+    const x = Math.cos(a) * r, z = Math.sin(a) * r;
+    wp.set(x, sandY(x, z) + 0.012, z); wq.setFromAxisAngle(new THREE.Vector3(0, 1, 0), a + Math.sin(i) * 0.6);
+    ws.set(1.4 + Math.abs(Math.sin(i * 1.3)) * 1.6, 1, 0.35 + Math.abs(Math.cos(i * 2.1)) * 0.3);
+    wm.compose(wp, wq, ws); weeds.setMatrixAt(i, wm);
+  }
+  weeds.receiveShadow = true; weeds.userData.dynamic = true; scene.add(weeds);
 }
 
 function buildPalm(x, z, height, leanX, leanZ, seed) {
@@ -470,7 +504,6 @@ function jollyRogerTexture() {
 
 // Mehr Piraten-Kram auf der Insel
 function buildPirateIsland() {
-  const sandY = (x, z) => { const r = Math.hypot(x, z); return r < 4.2 ? 0 : -1.5 + 1.5 * Math.sqrt(Math.max(0, 1 - (r / 14) * (r / 14))); };
   const wood = std(0xffffff, 0.85, { map: canvasTex(woodCanvas(256, 128, '#7a5230', 6)) });
   const iron = std(0x2a2724, 0.45, { metalness: 0.7 });
   const gold = std(0xf2c24a, 0.3, { metalness: 0.9, emissive: 0x4a3000, emissiveIntensity: 0.45 });
@@ -777,6 +810,23 @@ function buildTable(n) {
   const leg = mesh(barrelGeometry(0.3 + tableR * 0.12, 0.36 + tableR * 0.14, TABLE_Y - 0.06), legMat);
   leg.position.y = (TABLE_Y - 0.06) / 2; tableGroup.add(leg);
   addHoops(leg, 0.36 + tableR * 0.14, TABLE_Y - 0.06);
+  // Kleinkram neben der Laterne: Rumflasche, Münzstapel, Messer
+  const bottle = new THREE.Group();
+  const glassMat = new THREE.MeshPhysicalMaterial({ color: 0x2c4a22, roughness: 0.12, metalness: 0, clearcoat: 1, transparent: true, opacity: 0.88 });
+  const bGeo = new THREE.LatheGeometry([[0, 0], [0.034, 0], [0.038, 0.006], [0.038, 0.1], [0.03, 0.125], [0.013, 0.145], [0.012, 0.19], [0.015, 0.195], [0.014, 0.2], [0, 0.2]].map(([x, y]) => new THREE.Vector2(x, y)), 18);
+  bottle.add(mesh(bGeo, glassMat));
+  const cork = mesh(new THREE.CylinderGeometry(0.0105, 0.011, 0.025, 10), std(0xb08a5a, 0.9)); cork.position.y = 0.205; bottle.add(cork);
+  const label = mesh(new THREE.CylinderGeometry(0.0385, 0.0385, 0.045, 18, 1, true), std(0xe8d8b0, 0.9, { side: THREE.DoubleSide }), false, false); label.position.y = 0.06; bottle.add(label);
+  bottle.position.set(0.17, TABLE_Y, -0.09); bottle.rotation.y = 0.6; tableGroup.add(bottle);
+  const coinMat = std(0xf2c24a, 0.3, { metalness: 0.9, emissive: 0x4a3000, emissiveIntensity: 0.35 });
+  const coinG = new THREE.CylinderGeometry(0.022, 0.022, 0.006, 14);
+  [[-0.16, 0.06, 5], [-0.12, 0.12, 2], [-0.19, 0.12, 1]].forEach(([x, z, n]) => {
+    for (let i = 0; i < n; i++) { const c = mesh(coinG, coinMat, false, true); c.position.set(x + Math.sin(i * 2.1) * 0.003, TABLE_Y + 0.003 + i * 0.006, z + Math.cos(i * 1.7) * 0.003); tableGroup.add(c); }
+  });
+  const knife = new THREE.Group();
+  const blade = mesh(new THREE.BoxGeometry(0.12, 0.003, 0.018), std(0xc8c8d0, 0.25, { metalness: 0.9 }), false, true); blade.position.x = 0.06; knife.add(blade);
+  const grip = mesh(new THREE.CylinderGeometry(0.009, 0.009, 0.07, 8), std(0x3a2414, 0.7), false, true); grip.rotation.z = Math.PI / 2; grip.position.x = -0.035; knife.add(grip);
+  knife.position.set(0.02, TABLE_Y + 0.009, 0.17); knife.rotation.y = 0.5; tableGroup.add(knife);
   // Laterne in der Mitte
   lantern = buildLantern();
   lantern.userData.dynamic = true;
@@ -1951,10 +2001,11 @@ export function debugCounts() {
 // Nur für Tests: Enten-Galerie am Strand (hinter dem eigenen Platz), zum Begutachten der Modelle
 export function debugGallery(ids, lid) {
   const out = [];
-  ids.forEach((id, i) => {
-    const parts = buildCharacter(id, false);
+  ids.forEach((x, i) => {
+    const [id, av] = Array.isArray(x) ? x : [x, null];
+    const parts = buildCharacter(id, false, av);
     const g = parts.g;
-    g.position.set((i - (ids.length - 1) / 2) * 0.9, 0, 3.6);
+    g.position.set((i - (ids.length - 1) / 2) * 0.62, 0, 3.6);
     g.rotation.y = Math.PI; // Blick zur Kamera (+z)
     scene.add(g);
     if (parts.lids && lid !== undefined) parts.lids.forEach((l) => { l.pivot.rotation.x = THREE.MathUtils.lerp(l.open, l.closed, lid); });
@@ -1990,7 +2041,7 @@ export function initPreview(host) {
   const ground = new THREE.Mesh(new THREE.CircleGeometry(0.7, 40), new THREE.MeshStandardMaterial({ color: 0xd9bf8a, roughness: 1 }));
   ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; sc.add(ground);
   const cam = new THREE.PerspectiveCamera(32, 1, 0.05, 20);
-  cam.position.set(0, 1.02, -1.55); cam.lookAt(0, 0.78, 0);
+  cam.position.set(0, 1.04, -1.8); cam.lookAt(0, 0.82, 0);
   const holder = new THREE.Group(); sc.add(holder);
   pv = { canvas, r, sc, cam, holder, spin: 0, drag: null, avKey: '' };
   canvas.addEventListener('pointerdown', (e) => { pv.drag = { x: e.clientX, spin: pv.spin }; try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* egal */ } });

@@ -4,9 +4,9 @@
 
 const OPTIONS = {
   body: 8,                                   // Gefieder (PLUMAGE in duck.js)
-  top: ['coat', 'vest', 'shirt'],            // Mantel, Weste, Ringelhemd
+  top: ['coat', 'vest', 'shirt', 'officer', 'sailor'], // Mantel, Weste, Ringelhemd, Kapitänsrock, Matrosenhemd
   topColor: 8,
-  hat: ['tricorn', 'feather', 'bandana', 'none'],
+  hat: ['tricorn', 'feather', 'bandana', 'captain', 'beanie', 'none'],
   hatColor: 6,
   scarf: 6,                                  // 0 = kein Halstuch, sonst Farbe 1..5
 };
@@ -18,10 +18,12 @@ function randomAvatar(rnd) {
     body: pick(OPTIONS.body),
     top: OPTIONS.top[pick(OPTIONS.top.length)],
     topColor: pick(OPTIONS.topColor),
-    hat: OPTIONS.hat[pick(3)],
+    hat: OPTIONS.hat[pick(OPTIONS.hat.length - 1)],
     hatColor: pick(OPTIONS.hatColor),
     patch: r() < 0.35,
-    scarf: 1 + pick(OPTIONS.scarf - 1),
+    scarf: r() < 0.8 ? 1 + pick(OPTIONS.scarf - 1) : 0,
+    earring: r() < 0.35,
+    hook: r() < 0.15,
   };
 }
 
@@ -36,6 +38,8 @@ function cleanAvatar(a) {
     hatColor: int(a.hatColor, OPTIONS.hatColor, 0),
     patch: a.patch === true,
     scarf: int(a.scarf, OPTIONS.scarf, 1),
+    earring: a.earring === true,
+    hook: a.hook === true,
   };
 }
 

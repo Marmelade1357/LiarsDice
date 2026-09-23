@@ -4,14 +4,15 @@ Das Würfel-Bluffspiel aus **Fluch der Karibik – Die Truhe des Todes** zum Spi
 
 ## Funktionen
 
-- **Ich-Perspektive in 3D** (Three.js): Du sitzt selbst am Tisch auf einer einsamen Pirateninsel – Palmen (eine mit Hängematte), Fackeln, Lagerfeuer, Piratenflagge, Kanone, Schatztruhen mit Goldhaufen, Anker, Ruderboot, Papagei, Krabbe, Möwen, Meer mit Wellen, Sonnenuntergang und Schiffe am Horizont (eins segelt langsam vorbei).
-- **Charakter-Editor in der Lobby**: Gefieder, Oberteil (Mantel, Weste, Ringelhemd) und Farbe, Kopfbedeckung (Dreispitz, mit Feder, Kopftuch, ohne) und Farbe, Halstuch und Augenklappe – mit drehbarer 3D-Vorschau. Wird im Browser gemerkt; Bots bekommen ein zufälliges Aussehen.
+- **Ich-Perspektive in 3D** (Three.js): Du sitzt selbst am Tisch (mit Rumflasche, Münzen und Messer) auf einer einsamen Pirateninsel mit unregelmäßiger Küste, Tanglinie, Riffen und doppelter Brandung – Palmen (eine mit Hängematte), Fackeln, Lagerfeuer, Piratenflagge, Kanone, Schatztruhen mit Goldhaufen, Anker, Ruderboot, Papagei, Krabbe, Möwen, Meer mit Wellen, Sonnenuntergang und Schiffe am Horizont (eins segelt langsam vorbei).
+- **Charakter-Editor in der Lobby**: Gefieder, Oberteil (Mantel, Kapitänsrock mit Epauletten, Weste, Ringelhemd, Matrosenhemd) und Farbe, Kopfbedeckung (Dreispitz, mit Feder, Zweispitz, Kopftuch, Strickmütze, ohne) und Farbe, Halstuch, Augenklappe, goldener Ohrring und Hakenhand – mit drehbarer 3D-Vorschau. Wird im Browser gemerkt; Bots bekommen ein zufälliges Aussehen.
 - **Der Tisch wächst mit der Crew**: 2–8 Spieler, Tischgröße und Anzahl der Plätze passen sich automatisch an.
 - **Enten in Piratenkostümen** (Mantel, Gürtel, Dreispitz mit Totenkopf oder Kopftuch, manchmal Augenklappe) sitzen am Tisch, halten ihren Becher mit dem Flügel, drehen den Kopf zur Person, die gerade dran ist, blinzeln, quaken beim Bieten (jede Ente in eigener Tonlage), schlagen bei „Lügner!“ mit den Flügeln und hauen auf den Tisch. Wer ausscheidet, lässt Kopf und Flügel hängen; der Sieger hüpft jubelnd im Goldregen. Über den Köpfen steht nur der Name.
 - **Becher schütteln & umdrehen**: Zu Beginn jeder Runde nehmen alle ihren Becher, schütteln ihn und knallen ihn umgedreht auf den Tisch.
 - **Aufdecken zum Mitzählen**: Alle kippen ihre Becher um, dann springen die passenden Würfel reihum hoch und über dem Tisch wird mitgezählt („1 … 2 … 3 …“). Danach groß „Gelogen!“ oder „Stimmt!“, und der verlorene Würfel fliegt in hohem Bogen aufs Meer. Die Würfelzahlen in der Crew-Liste ändern sich erst danach, damit nichts vorher verraten wird.
-- **Bieten in zwei Schritten**: erst die Augenzahl antippen, dann die Anzahl – angeboten werden nur erlaubte Anzahlen, ohne vorgegebene Vorschläge.
-- **Zug-Timer** (15/30/60 s oder aus, in der Lobby einstellbar): Der Rahmen um den Namen und der Ring um den Becher leeren sich, dazu eine Leiste an der Steuerung. Wenn du dran bist, leuchtet der Bildschirmrand auf, in den letzten 8 Sekunden pulsiert er rot. Läuft die Zeit ab, entscheidet ein Bot.
+- **Schwebendes HUD**: kompakte Crew-Liste oben links (wer dran ist, leuchtet golden; Würfel als Punkte), Symbol-Menü oben rechts, das aktuelle Gebot schwebt als Plakette über der bietenden Ente.
+- **Bieten**: Panel „Dein Gebot“ – Augenzahl antippen, Anzahl mit −/+ einstellen (nur erlaubte Werte), „Bieten“. Daneben der rote „Lügner!“-Knopf.
+- **Zug-Timer** (15/30/60 s oder aus, in der Lobby einstellbar): Der Rahmen um den Namen und der Ring um den Becher leeren sich, dazu eine Ring im Status. Wenn du dran bist, leuchtet der Bildschirmrand auf, in den letzten 8 Sekunden pulsiert er rot. Läuft die Zeit ab, entscheidet ein Bot.
 - **Kamera**: etwas höher und weiter hinten, breiteres Sichtfeld (die Nachbarn sind mit im Bild) und sie dreht sich sanft zur Ente, die gerade bietet – außer man schaut sich selbst um. Auf dem Handy im Hochformat steiler von oben.
 - **Tageszeit**: Mit jedem verlorenen Würfel geht die Sonne weiter unter; in der Schlussrunde ist Nacht mit Sternen, Mond und hell leuchtenden Fackeln.
 - **Unter den Becher schauen**: Knopf, Leertaste oder Klick auf den eigenen Becher – du hebst den Becher nur leicht an, so dass *du* die Würfel siehst. Alle anderen sehen live, dass du nachschaust (der Becher kippt an deinem Platz an, die Figur senkt den Kopf).
@@ -32,7 +33,7 @@ Reihum wird geboten, wie viele Würfel einer Augenzahl insgesamt unter allen Bec
 | `src/engine.js` | Regeln (reine Spiellogik, vom Server und den Tests genutzt) |
 | `src/bots.js` | Bot-KI (Binomial-Wahrscheinlichkeiten + etwas Bluff) |
 | `server.js` | Express + Socket.IO, Räume, Lobby, Wiederverbindung, Gucken/Blickrichtung |
-| `public/` | Oberfläche (Lobby, Steuerleiste, Crew-Übersicht), PWA-Icons |
+| `public/` | Oberfläche (Lobby, Charakter-Editor, Spiel-HUD), PWA-Icons |
 | `src3d/table3d.src.js` | 3D-Szene (Quelltext) → gebündelt nach `public/table3d.js` |
 | `src3d/duck.js` | Enten-Modelle (Körper, Mantel, Dreispitz/Kopftuch, Augen mit Lidern, Flügel) |
 | `src3d/scenery.js` | Insel-Deko: Palmen, Büsche, Gras, Felsen, Strandgut, Ruderboot, Schiffe mit Takelage |

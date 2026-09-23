@@ -110,66 +110,83 @@
     <div class="av-row" id="av-hatColor-row"><span class="av-label">Farbe</span><div id="av-hatColor" class="swatches"></div></div>
     <div class="av-row"><span class="av-label">Halstuch</span><div id="av-scarf" class="swatches"></div></div>
     <div class="av-row"><span class="av-label">Augenklappe</span><div id="av-patch" class="seg"></div></div>
+    <div class="av-row"><span class="av-label">Ohrring</span><div id="av-earring" class="seg"></div></div>
+    <div class="av-row"><span class="av-label">Hakenhand</span><div id="av-hook" class="seg"></div></div>
   </div>
   </div>
 </section>
 
 <!-- ============ SPIEL ============ -->
+<!-- Die 3D-Szene füllt den ganzen Bildschirm; das HUD liegt als schwebende Elemente darüber. -->
 <section id="screen-game" class="screen hidden">
-  <header class="game-header">
-    <div class="game-header-top">
-      <div class="game-header-left">
-        <span class="room-code small" id="game-code"></span>
-        <span id="round-badge" class="round-badge"></span>
-      </div>
-      <div class="game-header-right">
-        <button id="btn-toggle-sound" class="btn ghost small" title="Ton an/aus">🔊</button>
-        <button id="btn-toggle-players" class="btn ghost small" title="Mitspieler-Übersicht">👥<span class="lbl"> Crew</span></button>
-        <button id="btn-show-log" class="btn ghost small">🗒️<span class="lbl"> Verlauf</span></button>
-        <button id="btn-show-rules" class="btn ghost small" type="button">📜<span class="lbl"> Regeln</span></button>
-        <button id="btn-leave-game" class="btn ghost small">Verlassen</button>
-      </div>
-    </div>
-  </header>
-
   <div id="stage" class="stage">
     <div id="canvas-host" class="canvas-host"></div>
-
     <!-- Fallback ohne WebGL: einfache Liste -->
     <div id="flat-table" class="flat-table hidden"></div>
+    <div id="turn-flash" class="turn-flash"></div>
 
-    <aside id="crew-panel" class="crew-panel">
+    <!-- Oben links: Runde + Crew -->
+    <aside id="crew-panel" class="hud-panel crew-panel">
+      <div class="crew-head">
+        <span id="round-badge" class="round-badge"></span>
+        <span id="game-code" class="room-tag" aria-label="Raum-Code"></span>
+      </div>
       <ul id="crew-list" class="crew-list"></ul>
     </aside>
 
-    <div id="view-tools" class="view-tools">
-      <button id="btn-reset-view" class="chip" type="button" title="Blick zurücksetzen">🎯 Blick</button>
+    <!-- Oben rechts: Navigation -->
+    <nav class="hud-nav" aria-label="Spielmenü">
+      <button id="btn-toggle-sound" class="icon-btn" type="button" data-tip="Ton an/aus" aria-label="Ton an/aus">🔊</button>
+      <button id="btn-toggle-players" class="icon-btn" type="button" data-tip="Crew" aria-label="Crew">👥</button>
+      <button id="btn-show-log" class="icon-btn" type="button" data-tip="Verlauf" aria-label="Verlauf">📜</button>
+      <button id="btn-show-rules" class="icon-btn" type="button" data-tip="Regeln" aria-label="Regeln">📖</button>
+      <button id="btn-leave-game" class="icon-btn icon-leave" type="button" data-tip="Spiel verlassen" aria-label="Spiel verlassen">✕</button>
+    </nav>
+
+    <!-- Aktuelles Gebot: schwebt über der Ente, die es abgegeben hat -->
+    <div id="bid-badge" class="bid-badge hidden" aria-live="polite"></div>
+
+    <!-- Unten links: Nebenaktionen -->
+    <div class="hud-side">
+      <button id="btn-peek" class="hud-btn secondary" type="button" data-tip="Leertaste halten oder eigenen Becher anklicken">👁 <span class="lbl">Becher ansehen</span></button>
+      <button id="btn-reset-view" class="icon-btn" type="button" data-tip="Blick zurücksetzen" aria-label="Blick zurücksetzen">🧭</button>
     </div>
 
-    <div id="turn-flash" class="turn-flash"></div>
-    <div id="peek-hud" class="peek-hud hidden"></div>
-    <div id="banner" class="banner hidden"></div>
-  </div>
-
-  <!-- Steuerung unten -->
-  <div id="control-bar" class="control-bar">
-    <div id="turn-timer" class="turn-timer hidden"><i></i></div>
-    <div id="status-line" class="status-line"></div>
-    <div class="controls-row">
-      <div class="row-a">
-        <button id="btn-peek" class="btn peek-btn" type="button" title="Leertaste halten oder auf den eigenen Becher klicken">🎲 <span class="lbl-long">Unter den Becher schauen</span><span class="lbl-short">Schauen</span></button>
-        <!-- Bieten in zwei Schritten: erst Augenzahl, dann Anzahl -->
-        <div id="bid-flow" class="bid-flow hidden">
-          <div class="bid-step"><span class="step-lbl">1. Augenzahl</span><div id="face-row" class="face-row"></div></div>
-          <div class="bid-step" id="qty-step"><span class="step-lbl">2. Wie viele?</span><div id="qty-row" class="qty-row"></div></div>
+    <!-- Unten mittig: Status und Aktionen -->
+    <div id="action-dock" class="action-dock">
+      <div id="peek-hud" class="peek-hud hidden"></div>
+      <!-- Aufdeck-Ergebnis -->
+      <div id="banner" class="hud-panel banner hidden"></div>
+      <div id="status-pill" class="hud-panel status-pill">
+        <div id="turn-timer" class="turn-ring hidden" aria-hidden="true">
+          <svg viewBox="0 0 36 36"><circle class="track" cx="18" cy="18" r="15.5"></circle><circle class="prog" cx="18" cy="18" r="15.5"></circle></svg>
+          <span id="turn-secs"></span>
         </div>
-      </div>
-      <div class="row-b">
-        <div id="call-controls" class="call-controls hidden">
-          <button id="btn-liar" class="btn liar" type="button">Lügner!</button>
-          <button id="btn-spot" class="btn spot hidden" type="button">Genau!</button>
-        </div>
+        <span id="status-line" class="status-text"></span>
         <div id="host-controls" class="host-controls"></div>
+      </div>
+      <div class="dock-row">
+        <div id="bid-panel" class="hud-panel bid-panel hidden">
+          <div class="bid-main">
+            <div class="hud-label">Dein Gebot</div>
+            <div id="bid-preview" class="bid-preview"></div>
+          </div>
+          <div class="bid-inputs">
+            <div class="hud-label">Augenzahl</div>
+            <div id="face-row" class="face-row"></div>
+            <div class="hud-label">Anzahl</div>
+            <div class="qty-stepper">
+              <button id="qty-minus" class="step-btn" type="button" aria-label="Weniger">−</button>
+              <span id="qty-value" class="qty-value"></span>
+              <button id="qty-plus" class="step-btn" type="button" aria-label="Mehr">+</button>
+            </div>
+          </div>
+          <button id="btn-bid" class="hud-btn primary bid-go" type="button">Bieten</button>
+        </div>
+        <div id="call-controls" class="call-controls hidden">
+          <button id="btn-liar" class="liar-btn" type="button">Lügner!</button>
+          <button id="btn-spot" class="hud-btn spot hidden" type="button">Genau!</button>
+        </div>
       </div>
     </div>
   </div>

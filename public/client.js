@@ -198,12 +198,12 @@
     bandana: [0xb3202a, 0x1f4aa0, 0x1d1814, 0x8a2a8a, 0x2a8a5a, 0xe0a020],
     scarf: [0xb3202a, 0x1f4aa0, 0xe0a020, 0x8a2a8a, 0x2a8a5a],
   };
-  const TOPS = [['coat', 'Mantel'], ['vest', 'Weste'], ['shirt', 'Ringelhemd']];
-  const HATS = [['tricorn', 'Dreispitz'], ['feather', 'mit Feder'], ['bandana', 'Kopftuch'], ['none', 'Ohne']];
+  const TOPS = [['coat', 'Mantel'], ['officer', 'Kapitänsrock'], ['vest', 'Weste'], ['shirt', 'Ringelhemd'], ['sailor', 'Matrose']];
+  const HATS = [['tricorn', 'Dreispitz'], ['feather', 'mit Feder'], ['captain', 'Zweispitz'], ['bandana', 'Kopftuch'], ['beanie', 'Strickmütze'], ['none', 'Ohne']];
   const hex = (n) => '#' + n.toString(16).padStart(6, '0');
   function randomAvatar() {
     const p = (n) => Math.floor(Math.random() * n);
-    return { body: p(8), top: TOPS[p(3)][0], topColor: p(8), hat: HATS[p(3)][0], hatColor: p(6), patch: Math.random() < 0.35, scarf: 1 + p(5) };
+    return { body: p(8), top: TOPS[p(TOPS.length)][0], topColor: p(8), hat: HATS[p(HATS.length - 1)][0], hatColor: p(6), patch: Math.random() < 0.35, scarf: Math.random() < 0.8 ? 1 + p(5) : 0, earring: Math.random() < 0.35, hook: Math.random() < 0.15 };
   }
   let avatar = (() => { try { const a = JSON.parse(safeGet(AVATAR_KEY) || 'null'); if (a && typeof a.body === 'number') return a; } catch (e) { /* egal */ } return randomAvatar(); })();
   function setAvatar(patch) {
@@ -240,9 +240,11 @@
     swatchRow('av-topColor', PAL.top, 'topColor');
     segRow('av-hat', HATS, 'hat');
     $('av-hatColor-row').classList.toggle('hidden', avatar.hat === 'none');
-    swatchRow('av-hatColor', avatar.hat === 'bandana' ? PAL.bandana : PAL.hat, 'hatColor');
+    swatchRow('av-hatColor', avatar.hat === 'bandana' || avatar.hat === 'beanie' ? PAL.bandana : PAL.hat, 'hatColor');
     swatchRow('av-scarf', PAL.scarf, 'scarf', true);
     segRow('av-patch', [[false, 'Nein'], [true, 'Ja']], 'patch');
+    segRow('av-earring', [[false, 'Nein'], [true, 'Ja']], 'earring');
+    segRow('av-hook', [[false, 'Nein'], [true, 'Ja']], 'hook');
     if (b3 && b3.setPreviewAvatar) b3.setPreviewAvatar(avatar);
   }
   $('btn-av-random').addEventListener('click', () => setAvatar(randomAvatar()));

@@ -67,7 +67,7 @@ function trunkTexture() {
   const cv = document.createElement('canvas'); cv.width = 128; cv.height = 256;
   const c = cv.getContext('2d');
   const g = c.createLinearGradient(0, 0, 0, 256);
-  g.addColorStop(0, '#8a7258'); g.addColorStop(1, '#6e5a44');
+  g.addColorStop(0, '#a68c6c'); g.addColorStop(1, '#8a7358');
   c.fillStyle = g; c.fillRect(0, 0, 128, 256);
   for (let i = 0; i < 260; i++) { c.fillStyle = `rgba(${40 + Math.random() * 30},${30 + Math.random() * 20},20,${0.1 + Math.random() * 0.2})`; c.fillRect(Math.random() * 128, Math.random() * 256, 1 + Math.random() * 2, 6 + Math.random() * 20); }
   // Blattnarben-Ring

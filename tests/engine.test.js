@@ -75,4 +75,5 @@ assert(c.body === 0 && c.top === 'coat' && c.topColor === 3 && c.hat === 'feathe
 assert(AV.cleanAvatar(null) === null, 'kein Avatar');
 const ra = AV.randomAvatar();
 assert(JSON.stringify(AV.cleanAvatar(ra)) === JSON.stringify(ra), 'Zufalls-Avatar ist gültig');
+assert(AV.cleanAvatar({ top: 'officer', hat: 'captain', earring: true, hook: true }).hook === true && AV.cleanAvatar({ top: 'sailor', hat: 'beanie' }).top === 'sailor', 'neue Outfits gültig');
 console.log('OK: engine.test.js - Avatar');

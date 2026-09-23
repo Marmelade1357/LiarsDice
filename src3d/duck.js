@@ -30,7 +30,7 @@ function resolveAvatar(hash, av) {
   return {
     body: (hash >>> 3) % PLUMAGE.length, top: 'coat', topColor: hash % COATS.length,
     hat: hatT === 0 ? 'feather' : hatT === 1 ? 'tricorn' : 'bandana', hatColor: (hash >>> 18) % 5,
-    patch: (hash >>> 9) % 3 === 0, scarf: 1 + ((hash >>> 20) % SCARVES.length),
+    patch: (hash >>> 9) % 3 === 0, scarf: 1 + ((hash >>> 20) % SCARVES.length), earring: (hash >>> 11) % 3 === 0, hook: false,
   };
 }
 let stripeTexCache = {};
@@ -43,6 +43,52 @@ function stripeTexture(color) {
   for (let y = 0; y < 64; y += 16) c.fillRect(0, y, 16, 8);
   const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping;
   stripeTexCache[color] = t; return t;
+}
+let ribTexCache = {};
+function ribTexture(color) {
+  if (ribTexCache[color]) return ribTexCache[color];
+  const cv = document.createElement('canvas'); cv.width = 64; cv.height = 16;
+  const c = cv.getContext('2d');
+  const base = new THREE.Color(color);
+  c.fillStyle = '#' + base.getHexString(); c.fillRect(0, 0, 64, 16);
+  c.fillStyle = 'rgba(0,0,0,0.22)';
+  for (let x = 0; x < 64; x += 4) c.fillRect(x, 0, 1.5, 16);
+  c.fillStyle = 'rgba(255,255,255,0.08)';
+  for (let x = 2; x < 64; x += 4) c.fillRect(x, 0, 1, 16);
+  const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(10, 1);
+  ribTexCache[color] = t; return t;
+}
+// Punkt auf der (skalierten) Kopfkugel in Richtung dir
+const HEAD_SCALE = new THREE.Vector3(1, 0.96, 1.06);
+function onHead(dir, r) { return dir.clone().normalize().multiplyScalar(r).multiply(HEAD_SCALE); }
+// Weg über die Kopfoberfläche durch mehrere Richtungen (sphärisch interpoliert)
+function headPath(dirs, r, steps) {
+  const pts = [];
+  for (let k = 0; k < dirs.length - 1; k++) {
+    const a = dirs[k].clone().normalize(), b = dirs[k + 1].clone().normalize();
+    const ang = a.angleTo(b);
+    for (let i = 0; i < steps; i++) {
+      const t = i / steps;
+      const v = ang < 1e-4 ? a.clone() : a.clone().multiplyScalar(Math.sin((1 - t) * ang) / Math.sin(ang)).add(b.clone().multiplyScalar(Math.sin(t * ang) / Math.sin(ang)));
+      pts.push(onHead(v, r));
+    }
+  }
+  pts.push(onHead(dirs[dirs.length - 1], r));
+  return new THREE.CatmullRomCurve3(pts);
+}
+// Zweispitz: zwei halbrunde, leicht gegeneinander geneigte Krempen (quer getragen)
+function bicornePlate(w, hgt, depth) {
+  const s = new THREE.Shape();
+  s.moveTo(-w, 0);
+  s.bezierCurveTo(-w * 0.9, hgt * 0.75, -w * 0.45, hgt, 0, hgt);
+  s.bezierCurveTo(w * 0.45, hgt, w * 0.9, hgt * 0.75, w, 0);
+  s.quadraticCurveTo(0, hgt * 0.18, -w, 0);
+  const g = new THREE.ExtrudeGeometry(s, { depth, bevelEnabled: true, bevelThickness: 0.003, bevelSize: 0.003, bevelSegments: 1, curveSegments: 20 });
+  g.translate(0, 0, -depth / 2);
+  // Oberkante für die Goldborte (die beiden Bézier-Bögen)
+  const arc = [];
+  s.curves.slice(0, 2).forEach((c, k) => c.getPoints(20).forEach((p, i) => { if (k === 0 || i > 0) arc.push(new THREE.Vector3(p.x, p.y, 0)); }));
+  return { geo: g, arc };
 }
 const BILL = 0xf2922a;
 
@@ -174,7 +220,8 @@ export function buildDuck(id, isMe, h, avatar) {
   const mLace = cloth(0xf2ecdc);
   const parts = { g, coat: mCoat, skin: mBody };
   const mStripe = new THREE.MeshPhysicalMaterial({ map: stripeTexture(coatColor), roughness: 0.85, sheen: 0.6, sheenRoughness: 0.5 });
-  const sleeveMat = av.top === 'coat' ? mCoat : av.top === 'vest' ? mLace : mStripe;
+  const coatLike = av.top === 'coat' || av.top === 'officer';
+  const sleeveMat = coatLike ? mCoat : av.top === 'shirt' ? mStripe : mLace;
 
   // Hocker (kleines Fass)
   const stool = mk(h.barrelGeometry(0.17, 0.2, 0.46), h.woodMat());
@@ -217,9 +264,26 @@ export function buildDuck(id, isMe, h, avatar) {
     const tail = mk(lathe([[0, 0], [0.055, 0.02], [0.072, 0.06], [0.06, 0.11], [0.03, 0.15], [0.0, 0.165]], 16), mBody);
     tail.scale.set(1.35, 1, 0.55); tail.position.set(0, 0.035, 0.2); tail.rotation.x = 1.2; torso.add(tail);
 
-    const gap = av.top === 'shirt' ? 0 : av.top === 'vest' ? 1.25 : 0.95;
+    const gap = av.top === 'shirt' || av.top === 'sailor' ? 0 : av.top === 'vest' ? 1.25 : av.top === 'officer' ? 0.8 : 0.95;
     const pOf = (r, y, phi) => new THREE.Vector3(Math.sin(phi) * r, y, Math.cos(phi) * r * 1.1);
-    if (av.top === 'shirt') {
+    if (av.top === 'sailor') {
+      // Matrosenhemd: weiß, mit großem Kragen in der gewählten Farbe (hinten eckig, vorne V)
+      const shirtProf = BODY_PROFILE.filter(([, y]) => y >= 0.06 && y <= 0.4).map(([r, y]) => [r * 1.05 + 0.004, y]);
+      shirtProf.unshift([profileAt(0.035) * 1.05 + 0.01, 0.035]);
+      const sg = lathe(shirtProf, 40); sg.scale(1, 1, 1.1);
+      torso.add(mk(sg, mLace));
+      const cr = profileAt(0.41) * 1.05 + 0.006;
+      const colGeo = lathe([[cr - 0.002, 0.425], [cr + 0.02, 0.41], [cr + 0.05, 0.38], [cr + 0.072, 0.34], [cr + 0.078, 0.315]], 40, Math.PI + 0.55, Math.PI * 2 - 1.1);
+      colGeo.scale(1, 1, 1.1);
+      const mCol = mCoat.clone(); mCol.side = THREE.DoubleSide;
+      torso.add(mk(colGeo, mCol));
+      // weiße Doppellinie am Kragenrand
+      [0.006, 0.018].forEach((inset) => {
+        const pts = [];
+        for (let k = 0; k <= 30; k++) { const phi = Math.PI + 0.55 + (k / 30) * (Math.PI * 2 - 1.1); pts.push(pOf(cr + 0.078 - inset * 0.9 + 0.002, 0.315 + inset * 1.2, phi)); }
+        torso.add(mk(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 60, 0.0028, 4, false), mLace, false, false));
+      });
+    } else if (av.top === 'shirt') {
       // Ringelhemd: rundum geschlossen, gestreift
       const shirtProf = BODY_PROFILE.filter(([, y]) => y >= 0.06 && y <= 0.4).map(([r, y]) => [r * 1.05 + 0.004, y]);
       shirtProf.unshift([profileAt(0.035) * 1.05 + 0.01, 0.035]);
@@ -230,7 +294,7 @@ export function buildDuck(id, isMe, h, avatar) {
       const neck = mk(new THREE.TorusGeometry(profileAt(0.4) * 1.05 + 0.006, 0.008, 6, 32), cloth(coatColor)); neck.rotation.x = Math.PI / 2; neck.scale.set(1, 1.1, 1); neck.position.y = 0.4; torso.add(neck);
     } else {
       // Mantel (lang, mit Kragen) oder Weste (kurz, ärmellos, weiter offen)
-      const topY = av.top === 'vest' ? 0.36 : 0.39;
+      const topY = av.top === 'vest' ? 0.36 : 0.39; // Mantel und Kapitänsrock gehen bis zum Hals
       const coatProf = BODY_PROFILE.filter(([, y]) => y >= 0.06 && y <= topY).map(([r, y]) => [r * 1.07 + 0.004, y]);
       coatProf.unshift([profileAt(0.035) * 1.07 + 0.012, av.top === 'vest' ? 0.075 : 0.035]);
       if (av.top === 'vest') coatProf.splice(1, coatProf.findIndex(([, y]) => y > 0.09) - 1);
@@ -246,12 +310,25 @@ export function buildDuck(id, isMe, h, avatar) {
       for (let k = 0; k < L; k++) edgePts.push(pOf(coatProf[k][0] + 0.003, coatProf[k][1], Math.PI - gap / 2));
       const trim = mk(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(edgePts), 90, 0.007, 5, false), mGold, false, false);
       torso.add(trim);
-      [0.14, 0.21].concat(av.top === 'coat' ? [0.28] : []).forEach((y) => [1, -1].forEach((sd) => {
-        const btn = mk(new THREE.SphereGeometry(0.011, 8, 6), mGold, false, false);
-        btn.position.copy(pOf(profileAt(y) * 1.07 + 0.012, y, Math.PI + sd * (gap / 2 + 0.12)));
+      const btnYs = av.top === 'officer' ? [0.17, 0.22, 0.27, 0.32] : [0.14, 0.21].concat(av.top === 'coat' ? [0.28] : []);
+      btnYs.forEach((y) => [1, -1].forEach((sd) => {
+        const btn = mk(new THREE.SphereGeometry(av.top === 'officer' ? 0.009 : 0.011, 8, 6), mGold, false, false);
+        btn.position.copy(pOf(profileAt(y) * 1.07 + 0.012, y, Math.PI + sd * (gap / 2 + (av.top === 'officer' ? 0.1 : 0.12))));
         torso.add(btn);
       }));
-      if (av.top === 'coat') {
+      if (av.top === 'officer') {
+        // Kapitänsrock: goldene Epauletten mit Fransen, weiße Weste darunter
+        [1, -1].forEach((sd) => {
+          const ep = new THREE.Group(); ep.position.set(sd * 0.165, 0.37, 0.0); ep.rotation.z = -sd * 0.55; torso.add(ep);
+          const pad = mk(new THREE.CylinderGeometry(0.05, 0.055, 0.014, 20), mGold, false, false); pad.scale.set(1, 1, 0.8); ep.add(pad);
+          const fringe = mk(new THREE.CylinderGeometry(0.055, 0.062, 0.034, 24, 1, true), new THREE.MeshStandardMaterial({ color: 0xd8ae4a, roughness: 0.5, metalness: 0.7, side: THREE.DoubleSide }), false, false);
+          fringe.scale.set(1, 1, 0.8); fringe.position.y = -0.018; ep.add(fringe);
+        });
+        const vest = BODY_PROFILE.filter(([, y]) => y >= 0.14 && y <= 0.4).map(([r, y]) => [r * 1.035 + 0.003, y]);
+        const vg = lathe(vest, 24, Math.PI - gap / 2 - 0.05, gap + 0.1); vg.scale(1, 1, 1.1);
+        torso.add(mk(vg, mLace));
+      }
+      if (coatLike) {
         const cr = profileAt(0.385) * 1.07 + 0.004;
         const collarGeo = lathe([[cr - 0.004, 0.37], [cr + 0.006, 0.385], [cr + 0.016, 0.415], [cr + 0.03, 0.44], [cr + 0.024, 0.446]], 36, Math.PI + gap / 2 + 0.25, Math.PI * 2 - gap - 0.5);
         collarGeo.scale(1, 1, 1.1);
@@ -300,10 +377,20 @@ export function buildDuck(id, isMe, h, avatar) {
       const eg = new THREE.Group(); eg.position.copy(dir).multiplyScalar(0.125);
       eg.lookAt(eg.position.clone().add(dir)); head.add(eg);
       if (patch && i === 0) {
-        // Augenklappe: liegt wie das Auge auf dem Kopf, Band diagonal um den Kopf
-        const p = mk(new THREE.SphereGeometry(0.043, 16, 10), mDark, false, false); p.scale.set(1.08, 1.2, 0.72); eg.add(p);
-        const strap = mk(new THREE.TorusGeometry(0.146, 0.0045, 5, 48), mDark, false, false);
-        strap.rotation.set(Math.PI / 2 + 0.25, 0, sd * 0.55); strap.position.y = 0.022; head.add(strap);
+        // Augenklappe: flaches Leder-Schild, das der Kopfrundung folgt; Band schräg über die Stirn
+        // nach hinten und seitlich über der Wange nach hinten (kreuzt das andere Auge nicht)
+        const mPatch = new THREE.MeshStandardMaterial({ color: 0x15110e, roughness: 0.55 });
+        const capG = new THREE.Group(); capG.scale.copy(HEAD_SCALE); head.add(capG);
+        const PA = 0.3;
+        const cap = mk(new THREE.SphereGeometry(0.1435, 24, 8, 0, Math.PI * 2, 0, PA), mPatch, false, false);
+        cap.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir); capG.add(cap);
+        const rim = mk(new THREE.TorusGeometry(0.1435 * Math.sin(PA), 0.0035, 5, 28), mPatch, false, false);
+        rim.rotation.x = Math.PI / 2; rim.position.y = 0.1435 * Math.cos(PA);
+        const rimG = new THREE.Group(); rimG.add(rim); rimG.quaternion.copy(cap.quaternion); capG.add(rimG);
+        const rs = 0.1432;
+        const up = headPath([dir.clone().add(new THREE.Vector3(0.12, 0.3, 0)), new THREE.Vector3(-sd * 0.25, 0.8, -0.55), new THREE.Vector3(-sd * 0.35, 0.75, 0.55), new THREE.Vector3(0, 0.2, 1)], rs, 12);
+        const side = headPath([dir.clone().add(new THREE.Vector3(sd * 0.3, -0.05, 0)), new THREE.Vector3(sd * 1, 0.1, -0.15), new THREE.Vector3(sd * 0.7, 0.12, 0.7), new THREE.Vector3(0, 0.2, 1)], rs, 12);
+        [up, side].forEach((c) => head.add(mk(new THREE.TubeGeometry(c, 48, 0.0042, 5, false), mPatch, false, false)));
         return;
       }
       const eye = mk(new THREE.SphereGeometry(0.04, 16, 12), mWhite, false, false); eye.scale.set(1, 1.15, 0.7); eg.add(eye);
@@ -321,8 +408,39 @@ export function buildDuck(id, isMe, h, avatar) {
     });
 
     // Kopfbedeckung (sitzt oberhalb der Augenbrauen)
-    const hatType = av.hat === 'feather' ? 0 : av.hat === 'tricorn' ? 1 : av.hat === 'bandana' ? 2 : 3;
-    if (hatType < 2) {
+    const hatType = av.hat === 'feather' ? 0 : av.hat === 'tricorn' ? 1 : av.hat === 'bandana' ? 2 : av.hat === 'captain' ? 4 : av.hat === 'beanie' ? 5 : 3;
+    if (hatType === 4) {
+      // Zweispitz des Kapitäns: quer getragen, Goldborte, Kokarde und Federbusch
+      const hatMat = cloth(HAT_COLORS[av.hatColor % HAT_COLORS.length]);
+      const hat = new THREE.Group(); hat.position.set(0, 0.085, 0.01); hat.rotation.x = -0.1; head.add(hat); parts.hat = hat;
+      const crown = mk(new THREE.SphereGeometry(0.128, 28, 10, 0, Math.PI * 2, 0, Math.PI / 2), hatMat); crown.scale.set(1, 0.62, 1.02); hat.add(crown);
+      const W = 0.24, HH = 0.15;
+      [-1, 1].forEach((fz) => {
+        const bp = bicornePlate(W, HH, 0.012);
+        const pl = mk(bp.geo, hatMat); pl.position.set(0, 0.0, fz * 0.045); pl.rotation.x = fz * 0.2; hat.add(pl);
+        const tr = mk(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(bp.arc), 60, 0.0095, 6, false), mGold, false, false);
+        tr.position.copy(pl.position); tr.rotation.copy(pl.rotation); hat.add(tr);
+      });
+      const cock = mk(new THREE.CylinderGeometry(0.026, 0.026, 0.008, 18), new THREE.MeshStandardMaterial({ color: 0xa81c22, roughness: 0.6 }), false, false);
+      cock.rotation.x = Math.PI / 2 - 0.2; cock.position.set(0.1, 0.07, -0.058); hat.add(cock);
+      const cb = mk(new THREE.SphereGeometry(0.009, 8, 6), mGold, false, false); cb.position.set(0.1, 0.07, -0.064); hat.add(cb);
+      if (!featherTex) featherTex = featherTexture();
+      const fg = new THREE.PlaneGeometry(0.06, 0.24, 1, 8); const fp = fg.attributes.position;
+      for (let k = 0; k < fp.count; k++) { const y = fp.getY(k) + 0.12; fp.setZ(k, y * y * 0.9); }
+      fg.computeVertexNormals();
+      const plume = new THREE.Mesh(fg, new THREE.MeshStandardMaterial({ map: featherTex, color: 0xf2efe6, alphaTest: 0.4, side: THREE.DoubleSide, roughness: 0.9 }));
+      plume.position.set(0.02, 0.19, 0); plume.rotation.set(0, Math.PI / 2, -0.35); hat.add(plume);
+    } else if (hatType === 5) {
+      // Strickmütze (Matrose): gerippt, mit umgeschlagenem Rand
+      const knit = new THREE.MeshStandardMaterial({ map: ribTexture(BANDANA_COLORS[av.hatColor % BANDANA_COLORS.length]), roughness: 0.95 });
+      const capG = new THREE.Group(); capG.scale.copy(HEAD_SCALE); capG.rotation.x = 0.16; capG.position.y = 0.006; head.add(capG);
+      const TH = Math.PI * 0.4, R = 0.15;
+      const cap = mk(new THREE.SphereGeometry(R, 32, 14, 0, Math.PI * 2, 0, TH), knit); cap.scale.set(1, 1.12, 1); capG.add(cap);
+      // umgeschlagener Rand: gerundetes Profil rund um die Mützenkante
+      const rr = R * Math.sin(TH), ry = R * Math.cos(TH) * 1.12;
+      const cuff = mk(lathe([[rr - 0.002, ry + 0.036], [rr + 0.009, ry + 0.034], [rr + 0.014, ry + 0.02], [rr + 0.013, ry + 0.002], [rr + 0.006, ry - 0.008], [rr - 0.004, ry - 0.006]], 40), knit);
+      capG.add(cuff);
+    } else if (hatType < 2) {
       const hatMat = cloth(HAT_COLORS[av.hatColor % HAT_COLORS.length]);
       const hat = new THREE.Group(); hat.position.set(0, 0.1, 0.008); hat.rotation.x = -0.12; head.add(hat); parts.hat = hat;
       const tc = tricornGeometry(0.098, 0.205, 0.085);
@@ -358,6 +476,11 @@ export function buildDuck(id, isMe, h, avatar) {
         tl.scale.set(1, 1, 0.35); tl.position.set(sd * 0.018, 0.03, 0.16); tl.rotation.set(Math.PI - 0.45, 0, sd * 0.35); head.add(tl);
       });
     }
+    // Goldener Ohrring (Enten haben keine Ohren - er hängt seitlich unter der Kopfkante)
+    if (av.earring) {
+      const er = mk(new THREE.TorusGeometry(0.019, 0.0035, 6, 20), mGold, false, false);
+      er.position.set(0.128, -0.07, 0.02); er.rotation.set(0, Math.PI / 2 - 0.3, 0); head.add(er);
+    }
   }
 
   // Flügel: Ärmel (Oberarm), Federflügel (Unterarm), Spitzenmanschette, gefächerte Federspitze
@@ -379,12 +502,26 @@ export function buildDuck(id, isMe, h, avatar) {
     });
     return h.mergeGeometries([paddle, ...geos]);
   })();
+  // Hakenhand: Holzstumpf mit Eisenhaken statt Flügelspitze (linke Seite)
+  const hookGeo = av.hook ? (() => {
+    const base = new THREE.CylinderGeometry(0.036, 0.03, 0.035, 16); base.translate(0, 0.0175, 0);
+    const shaft = new THREE.CylinderGeometry(0.007, 0.008, 0.05, 8); shaft.translate(0, 0.06, 0);
+    const curl = new THREE.TorusGeometry(0.026, 0.007, 8, 20, Math.PI * 1.25); curl.rotateZ(-Math.PI * 0.25); curl.translate(-0.026, 0.085, 0);
+    const tip = new THREE.ConeGeometry(0.007, 0.018, 8); tip.rotateZ(Math.PI * 0.5); tip.translate(-0.05, 0.068, 0);
+    return { wood: base, iron: h.mergeGeometries([shaft, curl, tip].map((g) => g.toNonIndexed())) };
+  })() : null;
+  const mIron = new THREE.MeshStandardMaterial({ color: 0xb8b8c0, roughness: 0.3, metalness: 0.9 });
+  const mStump = new THREE.MeshStandardMaterial({ color: 0x6a4526, roughness: 0.8 });
   parts.arms = [1, -1].map((side) => {
     const upper = mk(upperGeo, sleeveMat);
     const fore = mk(foreGeo, sleeveMat);
     const cf = new THREE.Group();
-    cf.add(mk(cuffGeo, av.top === 'coat' ? mCoat : mLace)); cf.add(mk(cuffTrimGeo, mGold, false, false));
-    const hand = mk(tipGeo, mBody);
+    cf.add(mk(cuffGeo, coatLike ? mCoat : av.top === 'sailor' ? mCoat : mLace)); cf.add(mk(cuffTrimGeo, mGold, false, false));
+    let hand;
+    if (hookGeo && side === -1) {
+      hand = new THREE.Group();
+      hand.add(mk(hookGeo.wood, mStump)); hand.add(mk(hookGeo.iron, mIron));
+    } else hand = mk(tipGeo, mBody);
     g.add(upper); g.add(fore); g.add(cf); g.add(hand);
     return { side, upper, fore, cuff: cf, hand, L1, L2, short: isMe };
   });

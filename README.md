@@ -33,6 +33,8 @@ Reihum wird geboten, wie viele Würfel einer Augenzahl insgesamt unter allen Bec
 | `server.js` | Express + Socket.IO, Räume, Lobby, Wiederverbindung, Gucken/Blickrichtung |
 | `public/` | Oberfläche (Lobby, Steuerleiste, Crew-Übersicht), PWA-Icons |
 | `src3d/table3d.src.js` | 3D-Szene (Quelltext) → gebündelt nach `public/table3d.js` |
+| `src3d/duck.js` | Enten-Modelle (Körper, Mantel, Dreispitz/Kopftuch, Augen mit Lidern, Flügel) |
+| `src3d/scenery.js` | Insel-Deko: Palmen, Büsche, Gras, Felsen, Strandgut, Ruderboot, Schiffe mit Takelage |
 
 ## Entwicklung
 

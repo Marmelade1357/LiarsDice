@@ -1473,7 +1473,9 @@ export function update(view) {
   if (relaid || !prev || (prev.phaseKey !== phaseKey && !view.expectAnim)) snapToState(view);
   view.phaseKey = phaseKey;
   // Tischmitte
-  if (view.gamePhase === 'bidding' && view.bid) {
+  if (hudBadges && view.gamePhase === 'bidding') {
+    setCenter(null); // Gebot/Runde zeigt das HTML-HUD (schwebende Badge)
+  } else if (view.gamePhase === 'bidding' && view.bid) {
     const b = view.players.find((p) => p.id === view.bid.id);
     setCenter({ top: `Gebot von ${b ? b.name : '?'}`, qty: view.bid.qty, face: view.bid.face });
   } else if (view.gamePhase === 'bidding') {
@@ -1568,7 +1570,7 @@ export function events(list) {
         const s = seats[ev.id]; if (!s) break;
         seatOrder.forEach((o) => { if (o !== s && !o.bubble.userData.challenge) { o.bubbleSticky = false; o.bubbleUntil = Math.min(o.bubbleUntil, performance.now() + 400); } });
         s.bubble.userData.challenge = false;
-        showBubble(s, { qty: ev.qty, face: ev.face }, 60000, true);
+        if (!hudBadges) showBubble(s, { qty: ev.qty, face: ev.face }, 60000, true);
         s.nod = 1;
         if (O && O.sound) { O.sound('bid', 0.4); O.sound('quack', s.isMe ? 0.35 : 0.5, duckPitch(s.id), 1); }
         break;
@@ -2023,4 +2025,22 @@ export function setPreviewAvatar(av) {
   parts.g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
   pv.holder.add(parts.g);
   pv.parts = parts;
+}
+
+
+// ---------------------------------------------------------------------------
+// Schnittstelle zum HTML-HUD: Gebots-Badge statt Tischmitte/Sprechblase,
+// Bildschirmposition einer Ente (über dem Kopf), damit die Badge dort schweben kann.
+// ---------------------------------------------------------------------------
+let hudBadges = false;
+export function setHudOptions(o) { hudBadges = !!(o && o.bidBadges); centerKey = '__'; if (lastView) update(Object.assign({}, lastView, { expectAnim: false })); }
+const _proj = new THREE.Vector3();
+export function screenPos(id) {
+  const s = seats[id];
+  if (!s || s.isMe || !camera || !canvas) return null;
+  s.label.getWorldPosition(_proj);
+  _proj.y += 0.03;
+  _proj.project(camera);
+  if (_proj.z > 1) return null;
+  return { x: ((_proj.x + 1) / 2) * canvas.clientWidth, y: ((1 - _proj.y) / 2) * canvas.clientHeight };
 }

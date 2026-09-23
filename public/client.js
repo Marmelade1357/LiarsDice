@@ -24,7 +24,7 @@
   let soundOn = safeGet(SOUND_KEY) !== 'off';
   let peeking = false;
   let peekMap = {};           // playerId -> true (schaut gerade nach)
-  let sel = { face: null, key: null, sending: false };
+  let sel = { face: null, qty: 1, key: null, sending: false };
   let dismissedResult = null;
   let notifiedTurnKey = null;
   let revealBannerAt = 0;
@@ -433,7 +433,7 @@
   function renderGame(state) {
     $('game-code').textContent = state.code;
     const shownTotal = crewFreeze && Date.now() < crewFreeze.until ? crewFreeze.total : state.totalDice;
-    $('round-badge').innerHTML = state.roundNo ? `Runde ${state.roundNo}<span class="extra"> · ${shownTotal} Würfel am Tisch</span>` : '';
+    $('round-badge').innerHTML = state.roundNo ? `Runde ${state.roundNo}<span class="sub"> · ${shownTotal} 🎲</span>` : '';
     renderCrew(state);
     renderControls(state);
     renderBanner(state);
@@ -514,22 +514,24 @@
   function frozenDice(p) { return crewFreeze && Date.now() < crewFreeze.until && crewFreeze.counts[p.id] !== undefined ? crewFreeze.counts[p.id] : p.dice; }
   function renderCrew(state) {
     const list = $('crew-list'); list.innerHTML = '';
+    const max = state.settings.dice;
     state.players.forEach((p) => {
-      const cls = [];
-      if (state.currentTurnId === p.id) cls.push('turn');
+      const cls = ['crew-row'];
+      if (state.currentTurnId === p.id && state.phase === 'playing') cls.push('turn');
       if (p.id === myId()) cls.push('me');
       if (p.eliminated) cls.push('out');
-      const kids = [el('span', { class: 'nm', text: (p.isBot ? '🤖 ' : '') + p.name, title: p.name })];
-      const right = el('span', { class: 'dice' });
-      if (peekMap[p.id] || (p.id === myId() && peeking)) right.appendChild(el('span', { class: 'peek', text: '👀 ' }));
+      const body = PAL.body[(p.avatar && p.avatar.body) || 0] || PAL.body[0];
       const fd = frozenDice(p);
-      right.appendChild(document.createTextNode(p.eliminated && fd === 0 ? '☠' : `🎲 ${fd}`));
-      kids.push(right);
+      const pips = el('span', { class: 'pips', title: `${fd} Würfel` });
+      for (let i = 0; i < Math.max(max, fd); i++) pips.appendChild(el('span', { class: 'pip' + (i < fd ? '' : ' lost') }));
+      const kids = [
+        el('span', { class: 'dot', style: `background:${hex(body[1])}` }),
+        el('span', { class: 'nm', text: (p.isBot ? '🤖 ' : '') + p.name, title: p.name }),
+      ];
+      if (peekMap[p.id] || (p.id === myId() && peeking)) kids.push(el('span', { class: 'peek', text: '👁', title: 'schaut unter den Becher' }));
+      kids.push(pips);
       list.appendChild(el('li', { class: cls.join(' ') }, kids));
     });
-    if (state.bid) {
-      list.appendChild(el('li', { class: 'bid-row' }, [el('span', { class: 'nm', text: 'Gebot:' }), el('span', { class: 'dice' }, [document.createTextNode(`${state.bid.qty} × `), dieEl(state.bid.face, 'sm')])]));
-    }
   }
 
   // ----- Gucken -----
@@ -546,7 +548,7 @@
     if (!silent || !on) socket.emit('peek', { on });
     if (b3) b3.setMyPeek(on);
     $('btn-peek').classList.toggle('on', on);
-    $('btn-peek').innerHTML = on ? '🎲 <span class="lbl-long">Becher absetzen</span><span class="lbl-short">Absetzen</span>' : '🎲 <span class="lbl-long">Unter den Becher schauen</span><span class="lbl-short">Schauen</span>';
+    $('btn-peek').innerHTML = on ? '👁 <span class="lbl">Becher absetzen</span>' : '👁 <span class="lbl">Becher ansehen</span>';
     renderPeekHud();
     if (latestState) renderCrew(latestState);
   }
@@ -580,58 +582,59 @@
     return face > b.face ? b.qty : b.qty + 1;
   }
   function renderControls(state) {
-    const bar = $('control-bar');
     const me = state.players.find((p) => p.id === myId());
     const myTurn = state.phase === 'playing' && state.currentTurnId === myId();
     const rolling = state.rollMs > 0;
-    bar.classList.toggle('my-turn', myTurn && !rolling);
+    const pill = $('status-pill');
     const status = $('status-line'); status.innerHTML = '';
-    const bidFrag = () => (state.bid ? [el('span', { class: 'opt' }, [document.createTextNode(' · Gebot: '), el('b', { text: `${state.bid.qty} ×` }), dieEl(state.bid.face, 'sm'), document.createTextNode(` (${pname(state, state.bid.id)})`)])] : []);
 
     const peekBtn = $('btn-peek');
     peekBtn.classList.toggle('hidden', !(me && !me.eliminated && state.phase === 'playing' && state.gamePhase === 'bidding'));
 
     if (state.phase === 'gameover') {
-      status.appendChild(el('span', { html: `🏆 <b>${escapeHtml(pname(state, state.winnerId))}</b> gewinnt Liar's Dice!` }));
+      status.innerHTML = `🏆 <b>${escapeHtml(pname(state, state.winnerId))}</b> gewinnt`;
     } else if (state.gamePhase === 'reveal') {
-      status.appendChild(el('span', { text: 'Aufgedeckt – es wird gezählt …' }));
+      status.textContent = 'Aufgedeckt …';
     } else if (me && me.eliminated) {
-      status.appendChild(el('span', { text: '☠ Du hast keine Würfel mehr – du schaust zu.' }));
-      bidFrag().forEach((n) => status.appendChild(n));
+      status.textContent = '☠ Ausgeschieden – du schaust zu';
     } else if (rolling) {
-      status.appendChild(el('span', { text: '🎲 Alle schütteln ihre Becher …' }));
+      status.textContent = 'Alle schütteln ihre Becher …';
       setTimeout(() => { if (latestState === state) { state.rollMs = 0; renderControls(state); sync3d(false); } }, state.rollMs + 30);
     } else if (myTurn) {
-      status.appendChild(el('span', { text: state.bid ? 'Du bist dran – höher bieten oder „Lügner!“ rufen.' : 'Du eröffnest – tipp auf eine Würfelseite.' }));
-      bidFrag().forEach((n) => status.appendChild(n));
+      status.innerHTML = '<b>Du bist dran</b>';
     } else if (state.currentTurnId) {
-      status.appendChild(el('span', { html: `<b>${escapeHtml(pname(state, state.currentTurnId))}</b> überlegt …` }));
-      bidFrag().forEach((n) => status.appendChild(n));
+      status.innerHTML = `<b>${escapeHtml(pname(state, state.currentTurnId))}</b> überlegt …`;
     }
-    status.appendChild(el('span', { class: 'secs', id: 'turn-secs' }));
+    pill.classList.toggle('mine', myTurn && !rolling);
 
     const canBid = myTurn && !rolling && state.canRaise;
     const showCall = myTurn && !rolling && !!state.bid;
     const key = `${state.roundNo}:${state.turnNo}`;
-    if (sel.key !== key) { sel.key = key; sel.face = null; sel.sending = false; }
-    $('bid-flow').classList.toggle('hidden', !canBid);
+    if (sel.key !== key) {
+      sel.key = key; sel.sending = false;
+      const m = state.minRaise;
+      sel.face = m ? m.face : (state.settings.wildOnes ? 2 : 1);
+      sel.qty = m ? m.qty : 1;
+    }
+    $('bid-panel').classList.toggle('hidden', !canBid);
     $('call-controls').classList.toggle('hidden', !showCall);
     $('btn-spot').classList.toggle('hidden', !state.settings.spotOn);
-    if (canBid) renderBidFlow(state);
+    if (canBid) renderBidPanel(state);
 
     // Host: Nächste Runde / Überspringen (Überspringen nur ohne Zeitlimit nötig)
     const hc = $('host-controls'); hc.innerHTML = '';
     const isHost = state.hostId === myId();
     if (isHost && state.gamePhase === 'reveal' && state.phase === 'playing') {
-      hc.appendChild(el('button', { class: 'btn small', text: '⏭ Nächste Runde', onclick: () => socket.emit('nextRound') }));
+      hc.appendChild(el('button', { class: 'hud-btn small', type: 'button', text: '⏭ Nächste Runde', onclick: () => socket.emit('nextRound') }));
     }
     const w = state.waiting;
     if (w && isHost && !w.ids.includes(myId()) && !state.turnMs) {
-      const b = el('button', { class: 'btn ghost small hidden', id: 'btn-skip', text: '⏭ Überspringen', onclick: () => socket.emit('skipTurn') });
+      const b = el('button', { class: 'hud-btn small secondary hidden', type: 'button', id: 'btn-skip', text: '⏭ Überspringen', onclick: () => socket.emit('skipTurn') });
       hc.appendChild(b);
       skipWaitBase = { at: Date.now(), ms: w.elapsedMs };
       updateSkipBtn();
     }
+    pill.classList.toggle('solo', !status.textContent && !hc.childNodes.length);
     // Zug-Timer
     turnClock = state.turnMs && state.currentTurnId ? { deadline: Date.now() + state.turnMsLeft, total: state.turnMs, mine: myTurn, key } : null;
     updateTurnClock();
@@ -647,8 +650,9 @@
   }
   setInterval(updateSkipBtn, 1000);
 
-  // ----- Zug-Timer (Leiste oben an der Steuerung + Sekunden + Rand-Warnung) -----
+  // ----- Zug-Timer (Ring im Status + Sekunden + Rand-Warnung) -----
   let turnClock = null; let flashKey = null; let hurryTick = -1;
+  const RING = 97.4; // 2π · 15.5
   function flashEdge(cls) {
     const f = $('turn-flash');
     f.classList.remove('flash', 'hurry');
@@ -656,15 +660,14 @@
     f.classList.add(cls);
   }
   function updateTurnClock() {
-    const bar = $('turn-timer'); const secs = $('turn-secs'); const f = $('turn-flash');
-    if (!turnClock) { hide(bar); if (secs) secs.textContent = ''; f.classList.remove('hurry'); return; }
+    const ring = $('turn-timer'); const secs = $('turn-secs'); const f = $('turn-flash');
+    if (!turnClock) { hide(ring); secs.textContent = ''; f.classList.remove('hurry'); return; }
     const left = Math.max(0, turnClock.deadline - Date.now());
     const frac = Math.min(1, left / turnClock.total);
-    show(bar);
-    const i = bar.firstChild;
-    i.style.width = (frac * 100).toFixed(1) + '%';
-    bar.classList.toggle('low', left < 8000);
-    if (secs) secs.textContent = ` · ${Math.ceil(left / 1000)} s`;
+    show(ring);
+    ring.querySelector('.prog').style.strokeDashoffset = (RING * (1 - frac)).toFixed(2);
+    ring.classList.toggle('low', left < 8000);
+    secs.textContent = String(Math.ceil(left / 1000));
     if (turnClock.mine && left < 8000 && left > 0) {
       if (!f.classList.contains('hurry')) f.classList.add('hurry');
       const s = Math.ceil(left / 1000);
@@ -673,40 +676,86 @@
   }
   setInterval(updateTurnClock, 200);
 
-  // ----- Bieten: erst Augenzahl, dann Anzahl (ein Tipp auf die Anzahl bietet) -----
+  // ----- Bieten: Augenzahl wählen, Anzahl mit −/+ einstellen, „Bieten“ -----
   function sendBid(qty, face) {
     if (sel.sending) return;
     sel.sending = true;
     socket.emit('bid', { qty, face }, (res) => { sel.sending = false; if (res && !res.ok) toast(res.error); });
   }
-  function renderBidFlow(state) {
+  function clampQty(state) {
+    const lo = minQtyFor(state, sel.face);
+    sel.qty = Math.max(lo, Math.min(state.totalDice, sel.qty || lo));
+  }
+  function renderBidPanel(state) {
     const minFace = state.settings.wildOnes ? 2 : 1;
+    if (!sel.face || sel.face < minFace || minQtyFor(state, sel.face) > state.totalDice) {
+      for (let f = minFace; f <= 6; f++) if (minQtyFor(state, f) <= state.totalDice) { sel.face = f; break; }
+    }
+    clampQty(state);
     const fr = $('face-row'); fr.innerHTML = '';
     for (let f = minFace; f <= 6; f++) {
-      const minQ = minQtyFor(state, f);
-      const b = el('button', { class: 'face-btn' + (f === sel.face ? ' sel' : ''), type: 'button', title: `${f}er` }, [dieEl(f)]);
-      b.disabled = minQ > state.totalDice;
-      b.addEventListener('click', () => { sel.face = f; renderBidFlow(state); });
+      const b = el('button', { class: 'face-btn' + (f === sel.face ? ' sel' : ''), type: 'button', title: `${f}er`, 'aria-label': `Augenzahl ${f}` }, [dieEl(f)]);
+      b.disabled = minQtyFor(state, f) > state.totalDice;
+      b.addEventListener('click', () => { sel.face = f; renderBidPanel(state); bumpPreview(); });
       fr.appendChild(b);
     }
-    const qs = $('qty-step'); const qr = $('qty-row'); qr.innerHTML = '';
-    qs.classList.toggle('waiting', !sel.face);
-    if (!sel.face) { qr.appendChild(el('span', { class: 'qty-hint', text: '← erst eine Augenzahl wählen' })); return; }
-    const minQ = minQtyFor(state, sel.face);
-    for (let q = minQ; q <= state.totalDice; q++) {
-      const b = el('button', { class: 'qty-btn', type: 'button', title: `Biete ${q} × ${sel.face}er` }, [el('span', { text: `${q}×` }), dieEl(sel.face, 'sm')]);
-      b.addEventListener('click', () => sendBid(q, sel.face));
-      qr.appendChild(b);
-    }
+    $('qty-value').textContent = sel.qty;
+    $('qty-minus').disabled = sel.qty <= minQtyFor(state, sel.face);
+    $('qty-plus').disabled = sel.qty >= state.totalDice;
+    const pv = $('bid-preview'); pv.innerHTML = '';
+    pv.appendChild(el('span', { class: 'n', text: `${sel.qty}` }));
+    pv.appendChild(el('span', { class: 'x', text: '×' }));
+    pv.appendChild(dieEl(sel.face));
+    $('btn-bid').disabled = sel.sending;
   }
+  function bumpPreview() { const pv = $('bid-preview'); pv.classList.remove('bump'); void pv.offsetWidth; pv.classList.add('bump'); }
+  function stepQty(d) {
+    const s = latestState; if (!s || !s.canRaise) return;
+    sel.qty = (sel.qty || 1) + d; renderBidPanel(s); bumpPreview();
+  }
+  $('qty-minus').addEventListener('click', () => stepQty(-1));
+  $('qty-plus').addEventListener('click', () => stepQty(1));
+  $('btn-bid').addEventListener('click', () => { const s = latestState; if (!s) return; clampQty(s); sendBid(sel.qty, sel.face); });
 
-  $('btn-liar').addEventListener('click', () => socket.emit('callLiar', null, (res) => { if (res && !res.ok) toast(res.error); }));
+  $('btn-liar').addEventListener('click', () => {
+    const b = $('btn-liar'); b.classList.remove('impact'); void b.offsetWidth; b.classList.add('impact');
+    socket.emit('callLiar', null, (res) => { if (res && !res.ok) toast(res.error); });
+  });
   $('btn-spot').addEventListener('click', () => socket.emit('callSpot', null, (res) => { if (res && !res.ok) toast(res.error); }));
 
-  // Höhe der Steuerleiste an die Bühne weitergeben (sie wächst auf dem Handy mehrzeilig)
-  function syncBarHeight() { document.documentElement.style.setProperty('--bar-h', $('control-bar').offsetHeight + 'px'); }
-  if (window.ResizeObserver) new ResizeObserver(syncBarHeight).observe($('control-bar'));
-  window.addEventListener('resize', syncBarHeight);
+  // ----- Gebots-Plakette: schwebt über der Ente, die zuletzt geboten hat -----
+  let badgeKey = null;
+  function updateBidBadge() {
+    const badge = $('bid-badge'); const s = latestState;
+    const game = !$('screen-game').classList.contains('hidden');
+    if (!game || !s || s.phase !== 'playing' || s.gamePhase !== 'bidding' || !s.bid) { hide(badge); badgeKey = null; return; }
+    const bid = s.bid; const key = `${bid.id}:${bid.qty}:${bid.face}`;
+    if (key !== badgeKey) {
+      badge.innerHTML = '';
+      badge.appendChild(el('span', { class: 'who', text: bid.id === myId() ? 'Du' : pname(s, bid.id) }));
+      badge.appendChild(el('span', { class: 'val' }, [document.createTextNode(`${bid.qty} ×`), dieEl(bid.face, 'sm')]));
+      show(badge);
+      badge.classList.remove('pop'); void badge.offsetWidth; badge.classList.add('pop');
+      badgeKey = key;
+    }
+    const stage = $('stage');
+    const pos = b3 && mode3d ? b3.screenPos(bid.id) : null;
+    const W = stage.clientWidth; const H = stage.clientHeight;
+    if (pos && pos.x > 0 && pos.x < W && pos.y > 0 && pos.y < H) {
+      badge.classList.remove('no-tail');
+      const bw = badge.offsetWidth; const bh = badge.offsetHeight;
+      const x = Math.max(bw / 2 + 8, Math.min(W - bw / 2 - 8, pos.x));
+      const y = Math.max(bh + 8, Math.min(H - 8, pos.y - 12));
+      badge.style.left = x.toFixed(1) + 'px'; badge.style.top = y.toFixed(1) + 'px';
+    } else {
+      // eigenes Gebot oder Ente nicht im Bild: über der Steuerung
+      badge.classList.add('no-tail');
+      const dock = $('action-dock').getBoundingClientRect(); const st = stage.getBoundingClientRect();
+      badge.style.left = (W / 2).toFixed(1) + 'px';
+      badge.style.top = (dock.top - st.top - 10).toFixed(1) + 'px';
+    }
+  }
+  (function badgeLoop() { updateBidBadge(); requestAnimationFrame(badgeLoop); })();
 
   function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 
@@ -719,7 +768,7 @@
     const wait = revealBannerAt - Date.now();
     if (wait > 0) { hide(b); clearTimeout(bannerTimer); bannerTimer = setTimeout(() => { if (latestState) renderBanner(latestState); }, wait + 20); return; }
     b.innerHTML = '';
-    b.className = 'banner ' + (r.correct ? 'good' : 'bad');
+    b.className = 'hud-panel banner ' + (r.correct ? 'good' : 'bad');
     const caller = pname(state, r.callerId); const bidder = pname(state, r.bid.id);
     b.appendChild(el('div', { class: 'small', text: `${caller} ruft „${r.kind === 'spot' ? 'Genau!' : 'Lügner!'}“ – Gebot von ${bidder}: ${r.bid.qty} × ${r.bid.face}er` }));
     b.appendChild(el('div', { class: 'big' }, [document.createTextNode(`Es liegen ${r.actual} ×`), dieEl(r.bid.face)]));
@@ -798,6 +847,7 @@
         sound,
       });
       b3 = m;
+      if (m.setHudOptions) m.setHudOptions({ bidBadges: true });
       window.__liarsDice3d = m; // für Tests/Debugging
       m.setVisible(!$('screen-game').classList.contains('hidden'));
       sync3d(false);

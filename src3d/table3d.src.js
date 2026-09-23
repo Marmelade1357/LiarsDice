@@ -1696,7 +1696,7 @@ export function init(opts) {
   centerSprite.renderOrder = 7;
   scene.add(centerSprite);
   // Große Zählanzeige beim Aufdecken
-  countSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: canvasTex(mkCanvas(512, 288)), transparent: true, depthTest: false, depthWrite: false }));
+  countSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: canvasTex(mkCanvas(800, 288)), transparent: true, depthTest: false, depthWrite: false }));
   countSprite.userData.cv = countSprite.material.map.image;
   countSprite.renderOrder = 30; countSprite.visible = false;
   countSprite.position.set(0, TABLE_Y + 0.7, 0);
@@ -1932,14 +1932,23 @@ function paintCount(opts) {
     c.fillStyle = '#f4d58d'; c.fillText(String(opts.num), W / 2 - 50, 130);
     drawDieIcon(c, W / 2 + 60, 72, 110, opts.face);
   } else {
-    c.font = `900 118px ${SERIF}`;
+    // Schriftgröße so wählen, dass das Wort samt Kontur sicher auf die Fläche passt
+    let fs = 118;
+    c.font = `900 ${fs}px ${SERIF}`;
+    while (fs > 60 && c.measureText(opts.big).width + 40 > W - 40) { fs -= 4; c.font = `900 ${fs}px ${SERIF}`; }
     c.lineWidth = 20; c.strokeStyle = 'rgba(0,0,0,0.85)'; c.strokeText(opts.big, W / 2, 96);
     c.fillStyle = opts.color; c.fillText(opts.big, W / 2, 96);
     // Unterzeile: "8 × [Würfel] liegen · Gebot 6"
-    c.font = `700 40px ${FONT}`;
     const a = `${opts.actual} ×`; const b = `liegen · Gebot ${opts.qty}`;
-    const wa = c.measureText(a).width, wb = c.measureText(b).width, ds = 46, gap = 12;
-    const tot = wa + gap + ds + gap + wb; let x = W / 2 - tot / 2;
+    let fs2 = 40, wa, wb, ds, gap, tot;
+    for (;;) {
+      c.font = `700 ${fs2}px ${FONT}`;
+      wa = c.measureText(a).width; wb = c.measureText(b).width; ds = fs2 * 1.15; gap = fs2 * 0.3;
+      tot = wa + gap + ds + gap + wb;
+      if (tot + 60 <= W || fs2 <= 24) break;
+      fs2 -= 2;
+    }
+    let x = W / 2 - tot / 2;
     c.fillStyle = 'rgba(10,20,30,0.82)'; rr(c, x - 20, 176, tot + 40, 70, 35); c.fill();
     c.fillStyle = '#fff4dc'; c.textAlign = 'left';
     c.fillText(a, x, 212); x += wa + gap;
@@ -2231,8 +2240,8 @@ function tick() {
   updateAtmosphere(dt);
   if (countSprite && countSprite.visible) {
     const k = 1 + 0.35 * Math.max(0, 1 - (now - (countSprite.userData.popT || 0)) / 260);
-    const w = (portraitMode ? 0.95 : 0.8) * k;
-    countSprite.scale.set(w, w * 288 / 512, 1);
+    const w = (portraitMode ? 1.2 : 1.1) * k;
+    countSprite.scale.set(w, w * 288 / 800, 1);
   }
 
   const v = lastView;

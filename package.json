@@ -1,0 +1,24 @@
+{
+  "name": "liars-dice-online",
+  "version": "1.0.0",
+  "description": "Liar's Dice (wie in Fluch der Karibik) online spielen - mit Freunden im Browser, in der Ich-Perspektive auf einer einsamen Pirateninsel, mit Bots.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node tests/run.js",
+    "build3d": "esbuild src3d/table3d.src.js --bundle --minify --format=esm --outfile=public/table3d.js"
+  },
+  "engines": {
+    "node": ">=14"
+  },
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "socket.io-client": "^4.7.5",
+    "three": "^0.186.0"
+  }
+}

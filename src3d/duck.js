@@ -18,6 +18,32 @@ const PLUMAGE = [
 ];
 const COATS = [0x7a1e22, 0x1e3a66, 0x2c5a30, 0x5a3a20, 0x4c2a5e, 0x6a5a1c, 0x1c5a5a, 0x2e2e34];
 const SCARVES = [0xb3202a, 0x1f4aa0, 0xe0a020, 0x8a2a8a, 0x2a8a5a];
+const HAT_COLORS = [0x1d1814, 0x5a3a20, 0x7a1e22, 0x1e3a66, 0x2c5a30, 0x4c2a5e];
+const BANDANA_COLORS = [0xb3202a, 0x1f4aa0, 0x1d1814, 0x8a2a8a, 0x2a8a5a, 0xe0a020];
+// Für den Charakter-Editor (Farbfelder in der Lobby)
+export const DUCK_PALETTES = { PLUMAGE, COATS, SCARVES, HAT_COLORS, BANDANA_COLORS };
+
+// Aussehen aus dem Avatar (Editor) oder - falls keiner da - zufällig aus der Spieler-ID
+function resolveAvatar(hash, av) {
+  if (av) return av;
+  const hatT = (hash >>> 15) % 3;
+  return {
+    body: (hash >>> 3) % PLUMAGE.length, top: 'coat', topColor: hash % COATS.length,
+    hat: hatT === 0 ? 'feather' : hatT === 1 ? 'tricorn' : 'bandana', hatColor: (hash >>> 18) % 5,
+    patch: (hash >>> 9) % 3 === 0, scarf: 1 + ((hash >>> 20) % SCARVES.length),
+  };
+}
+let stripeTexCache = {};
+function stripeTexture(color) {
+  if (stripeTexCache[color]) return stripeTexCache[color];
+  const cv = document.createElement('canvas'); cv.width = 16; cv.height = 64;
+  const c = cv.getContext('2d');
+  c.fillStyle = '#f2ecdc'; c.fillRect(0, 0, 16, 64);
+  c.fillStyle = '#' + new THREE.Color(color).getHexString();
+  for (let y = 0; y < 64; y += 16) c.fillRect(0, y, 16, 8);
+  const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  stripeTexCache[color] = t; return t;
+}
 const BILL = 0xf2922a;
 
 function hashStr(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
@@ -133,11 +159,12 @@ function featherTexture() {
 let featherTex = null;
 
 // ---------------------------------------------------------------------------
-export function buildDuck(id, isMe, h) {
+export function buildDuck(id, isMe, h, avatar) {
   const hash = hashStr(id) >>> 0;
+  const av = resolveAvatar(hash, avatar);
   const g = new THREE.Group();
-  const pl = PLUMAGE[(hash >>> 3) % PLUMAGE.length];
-  const coatColor = COATS[hash % COATS.length];
+  const pl = PLUMAGE[av.body % PLUMAGE.length];
+  const coatColor = COATS[av.topColor % COATS.length];
   const mBody = feathers(pl[0], 0xffffff);
   const mHead = feathers(pl[1], 0xffffff);
   const mCoat = cloth(coatColor);
@@ -146,11 +173,14 @@ export function buildDuck(id, isMe, h) {
   const mDark = new THREE.MeshStandardMaterial({ color: 0x1b1612, roughness: 0.7 });
   const mLace = cloth(0xf2ecdc);
   const parts = { g, coat: mCoat, skin: mBody };
+  const mStripe = new THREE.MeshPhysicalMaterial({ map: stripeTexture(coatColor), roughness: 0.85, sheen: 0.6, sheenRoughness: 0.5 });
+  const sleeveMat = av.top === 'coat' ? mCoat : av.top === 'vest' ? mLace : mStripe;
 
   // Hocker (kleines Fass)
   const stool = mk(h.barrelGeometry(0.17, 0.2, 0.46), h.woodMat());
   stool.position.set(0, 0.23, 0.05);
   if (!isMe) g.add(stool);
+  parts.stool = stool;
 
   const body = new THREE.Group(); g.add(body); parts.body = body;
   body.position.set(0, 0.46, 0.04);
@@ -187,41 +217,63 @@ export function buildDuck(id, isMe, h) {
     const tail = mk(lathe([[0, 0], [0.055, 0.02], [0.072, 0.06], [0.06, 0.11], [0.03, 0.15], [0.0, 0.165]], 16), mBody);
     tail.scale.set(1.35, 1, 0.55); tail.position.set(0, 0.035, 0.2); tail.rotation.x = 1.2; torso.add(tail);
 
-    // Piratenmantel: vorne offen, mit goldener Borte, Knöpfen, Kragen und Gürtel
-    const coatProf = BODY_PROFILE.filter(([, y]) => y >= 0.06 && y <= 0.39).map(([r, y]) => [r * 1.07 + 0.004, y]);
-    coatProf.unshift([profileAt(0.035) * 1.07 + 0.012, 0.035]);
-    const gap = 0.95;
-    const coatGeo = lathe(coatProf, 40, Math.PI + gap / 2, Math.PI * 2 - gap);
-    coatGeo.scale(1, 1, 1.1);
-    const mCoat2 = mCoat.clone(); mCoat2.side = THREE.DoubleSide;
-    torso.add(mk(coatGeo, mCoat2));
-    // Borte entlang der Kanten
-    const edgePts = [];
+    const gap = av.top === 'shirt' ? 0 : av.top === 'vest' ? 1.25 : 0.95;
     const pOf = (r, y, phi) => new THREE.Vector3(Math.sin(phi) * r, y, Math.cos(phi) * r * 1.1);
-    const L = coatProf.length;
-    for (let k = L - 1; k >= 0; k--) edgePts.push(pOf(coatProf[k][0] + 0.003, coatProf[k][1], Math.PI + gap / 2));
-    for (let k = 1; k < 24; k++) { const phi = Math.PI + gap / 2 + (k / 24) * (Math.PI * 2 - gap); edgePts.push(pOf(coatProf[0][0] + 0.003, coatProf[0][1], phi)); }
-    for (let k = 0; k < L; k++) edgePts.push(pOf(coatProf[k][0] + 0.003, coatProf[k][1], Math.PI - gap / 2));
-    const trim = mk(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(edgePts), 90, 0.007, 5, false), mGold, false, false);
-    torso.add(trim);
-    [0.1, 0.17, 0.24].forEach((y) => [1, -1].forEach((sd) => {
-      const btn = mk(new THREE.SphereGeometry(0.011, 8, 6), mGold, false, false);
-      btn.position.copy(pOf(profileAt(y) * 1.07 + 0.012, y, Math.PI + sd * (gap / 2 + 0.12)));
-      torso.add(btn);
-    }));
-    const cr = profileAt(0.385) * 1.07 + 0.004;
-    const collarGeo = lathe([[cr - 0.004, 0.37], [cr + 0.006, 0.385], [cr + 0.016, 0.415], [cr + 0.03, 0.44], [cr + 0.024, 0.446]], 36, Math.PI + gap / 2 + 0.25, Math.PI * 2 - gap - 0.5);
-    collarGeo.scale(1, 1, 1.1);
-    torso.add(mk(collarGeo, mCoat2));
+    if (av.top === 'shirt') {
+      // Ringelhemd: rundum geschlossen, gestreift
+      const shirtProf = BODY_PROFILE.filter(([, y]) => y >= 0.06 && y <= 0.4).map(([r, y]) => [r * 1.05 + 0.004, y]);
+      shirtProf.unshift([profileAt(0.035) * 1.05 + 0.01, 0.035]);
+      const sg = lathe(shirtProf, 40); sg.scale(1, 1, 1.1);
+      const uvA = sg.attributes.uv; for (let k = 0; k < uvA.count; k++) uvA.setY(k, uvA.getY(k) * 7);
+      const mShirt = mStripe;
+      torso.add(mk(sg, mShirt));
+      const neck = mk(new THREE.TorusGeometry(profileAt(0.4) * 1.05 + 0.006, 0.008, 6, 32), cloth(coatColor)); neck.rotation.x = Math.PI / 2; neck.scale.set(1, 1.1, 1); neck.position.y = 0.4; torso.add(neck);
+    } else {
+      // Mantel (lang, mit Kragen) oder Weste (kurz, ärmellos, weiter offen)
+      const topY = av.top === 'vest' ? 0.36 : 0.39;
+      const coatProf = BODY_PROFILE.filter(([, y]) => y >= 0.06 && y <= topY).map(([r, y]) => [r * 1.07 + 0.004, y]);
+      coatProf.unshift([profileAt(0.035) * 1.07 + 0.012, av.top === 'vest' ? 0.075 : 0.035]);
+      if (av.top === 'vest') coatProf.splice(1, coatProf.findIndex(([, y]) => y > 0.09) - 1);
+      const coatGeo = lathe(coatProf, 40, Math.PI + gap / 2, Math.PI * 2 - gap);
+      coatGeo.scale(1, 1, 1.1);
+      const mCoat2 = mCoat.clone(); mCoat2.side = THREE.DoubleSide;
+      torso.add(mk(coatGeo, mCoat2));
+      // Borte entlang der Kanten
+      const edgePts = [];
+      const L = coatProf.length;
+      for (let k = L - 1; k >= 0; k--) edgePts.push(pOf(coatProf[k][0] + 0.003, coatProf[k][1], Math.PI + gap / 2));
+      for (let k = 1; k < 24; k++) { const phi = Math.PI + gap / 2 + (k / 24) * (Math.PI * 2 - gap); edgePts.push(pOf(coatProf[0][0] + 0.003, coatProf[0][1], phi)); }
+      for (let k = 0; k < L; k++) edgePts.push(pOf(coatProf[k][0] + 0.003, coatProf[k][1], Math.PI - gap / 2));
+      const trim = mk(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(edgePts), 90, 0.007, 5, false), mGold, false, false);
+      torso.add(trim);
+      [0.14, 0.21].concat(av.top === 'coat' ? [0.28] : []).forEach((y) => [1, -1].forEach((sd) => {
+        const btn = mk(new THREE.SphereGeometry(0.011, 8, 6), mGold, false, false);
+        btn.position.copy(pOf(profileAt(y) * 1.07 + 0.012, y, Math.PI + sd * (gap / 2 + 0.12)));
+        torso.add(btn);
+      }));
+      if (av.top === 'coat') {
+        const cr = profileAt(0.385) * 1.07 + 0.004;
+        const collarGeo = lathe([[cr - 0.004, 0.37], [cr + 0.006, 0.385], [cr + 0.016, 0.415], [cr + 0.03, 0.44], [cr + 0.024, 0.446]], 36, Math.PI + gap / 2 + 0.25, Math.PI * 2 - gap - 0.5);
+        collarGeo.scale(1, 1, 1.1);
+        torso.add(mk(collarGeo, mCoat2));
+      } else {
+        // Unter der Weste ein helles Hemd (sieht man an Hals und Ärmeln)
+        const shirtProf = BODY_PROFILE.filter(([, y]) => y >= 0.3 && y <= 0.41).map(([r, y]) => [r * 1.03 + 0.002, y]);
+        const sg = lathe(shirtProf, 32); sg.scale(1, 1, 1.1);
+        torso.add(mk(sg, mLace));
+      }
+    }
     const belt = mk(new THREE.TorusGeometry(profileAt(0.12) * 1.1 + 0.004, 0.016, 6, 40), new THREE.MeshStandardMaterial({ color: 0x2e1d10, roughness: 0.55 }));
     belt.rotation.x = Math.PI / 2; belt.scale.set(1, 1.1, 1); belt.position.y = 0.12; torso.add(belt);
     const buckle = mk(new THREE.TorusGeometry(0.022, 0.006, 4, 4), mGold, false, false);
     buckle.rotation.z = Math.PI / 4; buckle.position.set(0, 0.12, -(profileAt(0.12) * 1.1 + 0.004) * 1.1 - 0.012); torso.add(buckle);
     // Halstuch
-    const scarfMat = cloth(SCARVES[(hash >>> 20) % SCARVES.length]);
+    if (av.scarf > 0) {
+    const scarfMat = cloth(SCARVES[(av.scarf - 1) % SCARVES.length]);
     const scarf = mk(new THREE.TorusGeometry(profileAt(0.425) * 1.02 + 0.006, 0.02, 8, 32), scarfMat); scarf.rotation.x = Math.PI / 2 - 0.08; scarf.scale.set(1, 1.1, 1); scarf.position.set(0, 0.425, 0); torso.add(scarf);
     const knot = mk(new THREE.SphereGeometry(0.024, 10, 8), scarfMat); knot.position.set(0.02, 0.41, -0.13); torso.add(knot);
     const tip = mk(lathe([[0, 0], [0.02, 0.018], [0.018, 0.055], [0, 0.08]], 8), scarfMat); tip.scale.set(1, 1, 0.45); tip.position.set(0.025, 0.4, -0.135); tip.rotation.set(Math.PI - 0.25, 0, 0.25); torso.add(tip);
+    }
 
     // Kopf
     const head = new THREE.Group(); head.position.set(0, 0.565, -0.025); torso.add(head); parts.head = head;
@@ -241,7 +293,7 @@ export function buildDuck(id, isMe, h) {
     const mPupil = new THREE.MeshStandardMaterial({ color: 0x0b0b0b, roughness: 0.15 });
     const mShine = new THREE.MeshBasicMaterial({ color: 0xffffff });
     const mBrow = new THREE.MeshStandardMaterial({ color: new THREE.Color(pl[1]).multiplyScalar(0.5), roughness: 0.85 });
-    const patch = (hash >>> 9) % 3 === 0;
+    const patch = !!av.patch;
     parts.lids = [];
     [-1, 1].forEach((sd, i) => {
       const dir = new THREE.Vector3(sd * 0.42, 0.2, -0.885).normalize();
@@ -269,9 +321,9 @@ export function buildDuck(id, isMe, h) {
     });
 
     // Kopfbedeckung (sitzt oberhalb der Augenbrauen)
-    const hatType = (hash >>> 15) % 3;
+    const hatType = av.hat === 'feather' ? 0 : av.hat === 'tricorn' ? 1 : av.hat === 'bandana' ? 2 : 3;
     if (hatType < 2) {
-      const hatMat = cloth(0x1d1814);
+      const hatMat = cloth(HAT_COLORS[av.hatColor % HAT_COLORS.length]);
       const hat = new THREE.Group(); hat.position.set(0, 0.1, 0.008); hat.rotation.x = -0.12; head.add(hat); parts.hat = hat;
       const tc = tricornGeometry(0.098, 0.205, 0.085);
       const brim = mk(tc.geo, hatMat.clone()); brim.material.side = THREE.DoubleSide; hat.add(brim);
@@ -292,9 +344,9 @@ export function buildDuck(id, isMe, h) {
         plume.castShadow = true;
         plume.position.set(0.095, 0.15, 0.06); plume.rotation.set(-0.5, 0.4, -0.55); hat.add(plume);
       }
-    } else {
+    } else if (hatType === 2) {
       // Kopftuch: vorne oberhalb der Augenbrauen, hinten bis zum Nacken, Knoten hinten
-      const bandMat = new THREE.MeshPhysicalMaterial({ map: h.dotTexture(SCARVES[(hash >>> 18) % SCARVES.length]), roughness: 0.85, sheen: 0.8, sheenRoughness: 0.5 });
+      const bandMat = new THREE.MeshPhysicalMaterial({ map: h.dotTexture(BANDANA_COLORS[av.hatColor % BANDANA_COLORS.length]), roughness: 0.85, sheen: 0.8, sheenRoughness: 0.5 });
       const cap = mk(new THREE.SphereGeometry(0.147, 30, 14, 0, Math.PI * 2, 0, Math.PI * 0.4), bandMat);
       cap.scale.set(1, 0.97, 1.07); cap.rotation.x = 0.4; cap.position.y = 0.006; head.add(cap);
       const hem = mk(new THREE.TorusGeometry(0.147 * Math.sin(Math.PI * 0.4), 0.007, 6, 40), bandMat);
@@ -328,10 +380,10 @@ export function buildDuck(id, isMe, h) {
     return h.mergeGeometries([paddle, ...geos]);
   })();
   parts.arms = [1, -1].map((side) => {
-    const upper = mk(upperGeo, mCoat);
-    const fore = mk(foreGeo, mCoat);
+    const upper = mk(upperGeo, sleeveMat);
+    const fore = mk(foreGeo, sleeveMat);
     const cf = new THREE.Group();
-    cf.add(mk(cuffGeo, mCoat)); cf.add(mk(cuffTrimGeo, mGold, false, false));
+    cf.add(mk(cuffGeo, av.top === 'coat' ? mCoat : mLace)); cf.add(mk(cuffTrimGeo, mGold, false, false));
     const hand = mk(tipGeo, mBody);
     g.add(upper); g.add(fore); g.add(cf); g.add(hand);
     return { side, upper, fore, cuff: cf, hand, L1, L2, short: isMe };

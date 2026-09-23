@@ -50,6 +50,7 @@
 
 <!-- ============ LOBBY ============ -->
 <section id="screen-lobby" class="screen hidden">
+  <div class="lobby-layout">
   <div class="card">
     <div class="lobby-header">
       <div>
@@ -92,6 +93,24 @@
     <p id="lobby-status" class="hint"></p>
     <button id="btn-start" class="btn primary hidden">Spiel starten</button>
     <button id="btn-show-rules-lobby" class="btn ghost small rules-btn" type="button">📜 Regeln ansehen</button>
+  </div>
+
+  <!-- Charakter-Editor -->
+  <div class="card editor-card">
+    <div class="editor-head">
+      <h3>🦆 Deine Ente</h3>
+      <button id="btn-av-random" class="btn ghost small" type="button">🎲 Zufall</button>
+    </div>
+    <div id="av-preview" class="av-preview"><div id="av-preview-fallback" class="av-fallback hidden">🦆</div></div>
+    <p class="hint drag-hint">Zum Drehen ziehen</p>
+    <div class="av-row"><span class="av-label">Gefieder</span><div id="av-body" class="swatches"></div></div>
+    <div class="av-row"><span class="av-label">Oberteil</span><div id="av-top" class="seg"></div></div>
+    <div class="av-row"><span class="av-label">Farbe</span><div id="av-topColor" class="swatches"></div></div>
+    <div class="av-row"><span class="av-label">Kopf</span><div id="av-hat" class="seg"></div></div>
+    <div class="av-row" id="av-hatColor-row"><span class="av-label">Farbe</span><div id="av-hatColor" class="swatches"></div></div>
+    <div class="av-row"><span class="av-label">Halstuch</span><div id="av-scarf" class="swatches"></div></div>
+    <div class="av-row"><span class="av-label">Augenklappe</span><div id="av-patch" class="seg"></div></div>
+  </div>
   </div>
 </section>
 
@@ -139,21 +158,13 @@
     <div class="controls-row">
       <div class="row-a">
         <button id="btn-peek" class="btn peek-btn" type="button" title="Leertaste halten oder auf den eigenen Becher klicken">🎲 <span class="lbl-long">Unter den Becher schauen</span><span class="lbl-short">Schauen</span></button>
-        <!-- Schnell bieten: ein Tipp auf eine Würfelseite bietet das kleinste mögliche Gebot -->
-        <div id="quick-bids" class="quick-bids hidden"></div>
-        <div id="bid-controls" class="bid-controls hidden">
-          <div class="qty-picker">
-            <button id="qty-minus" class="btn round" type="button">−</button>
-            <span id="qty-value" class="qty-value">1</span>
-            <button id="qty-plus" class="btn round" type="button">+</button>
-            <span class="times">×</span>
-          </div>
-          <div id="face-picker" class="face-picker"></div>
-          <button id="btn-bid" class="btn primary bid-btn" type="button">Bieten</button>
+        <!-- Bieten in zwei Schritten: erst Augenzahl, dann Anzahl -->
+        <div id="bid-flow" class="bid-flow hidden">
+          <div class="bid-step"><span class="step-lbl">1. Augenzahl</span><div id="face-row" class="face-row"></div></div>
+          <div class="bid-step" id="qty-step"><span class="step-lbl">2. Wie viele?</span><div id="qty-row" class="qty-row"></div></div>
         </div>
       </div>
       <div class="row-b">
-        <button id="btn-custom" class="btn ghost small custom-btn hidden" type="button">✎ Anderes Gebot</button>
         <div id="call-controls" class="call-controls hidden">
           <button id="btn-liar" class="btn liar" type="button">Lügner!</button>
           <button id="btn-spot" class="btn spot hidden" type="button">Genau!</button>
@@ -190,7 +201,7 @@
       <p>Alle schütteln ihre Würfel im Becher und knallen ihn umgedreht auf den Tisch. Nur du darfst unter deinen eigenen Becher schauen (<b>🎲-Knopf</b>, <b>Leertaste</b> oder Klick auf den Becher) – die anderen sehen, dass du nachschaust, aber nicht, was du hast.</p>
       <h3>Bieten</h3>
       <p>Reihum wird geboten, wie viele Würfel einer Augenzahl <b>insgesamt auf dem Tisch</b> liegen – also unter allen Bechern zusammen, z. B. „fünf Vierer“. Wer dran ist, muss <b>höher bieten</b> (mehr Würfel, oder gleiche Anzahl mit höherer Augenzahl) – oder „Lügner!“ rufen.</p>
-      <p><b>Schnell bieten:</b> Unten steht für jede Augenzahl das kleinste erlaubte Gebot – ein Tipp darauf bietet es sofort. Für höhere Gebote gibt es „✎ Anderes Gebot“.</p>
+      <p><b>So bietest du:</b> Zuerst unten die Augenzahl antippen, dann die Anzahl – mit dem Tipp auf die Anzahl ist das Gebot abgegeben. Es werden nur erlaubte Anzahlen angeboten.</p>
       <h3>Lügner!</h3>
       <p>Dann heben alle ihre Becher. Liegen <b>mindestens</b> so viele Würfel der gebotenen Augenzahl, hat die bietende Person recht und wer „Lügner!“ gerufen hat, verliert einen Würfel. Liegen weniger, verliert die bietende Person einen Würfel.</p>
       <h3>Einsen als Joker (einstellbar)</h3>

@@ -67,3 +67,12 @@ r = E.challenge(g, 'c', 'liar');
 assert(g.phase === 'over' && g.winnerId === 'b' && r.events.some((e) => e.t === 'over'), 'b gewinnt');
 
 console.log('OK: engine.test.js - Regeln');
+
+// Aussehen (Charakter-Editor): ungültige Werte werden bereinigt
+const AV = require('../src/avatar');
+const c = AV.cleanAvatar({ body: 99, top: 'kilt', topColor: 3, hat: 'feather', hatColor: -1, patch: 'ja', scarf: 2 });
+assert(c.body === 0 && c.top === 'coat' && c.topColor === 3 && c.hat === 'feather' && c.hatColor === 0 && c.patch === false && c.scarf === 2, 'Avatar bereinigt');
+assert(AV.cleanAvatar(null) === null, 'kein Avatar');
+const ra = AV.randomAvatar();
+assert(JSON.stringify(AV.cleanAvatar(ra)) === JSON.stringify(ra), 'Zufalls-Avatar ist gültig');
+console.log('OK: engine.test.js - Avatar');

@@ -11,6 +11,7 @@ const express = require('express');
 const { Server } = require('socket.io');
 const E = require('./src/engine');
 const bots = require('./src/bots');
+const AV = require('./src/avatar');
 
 const app = express();
 const server = http.createServer(app);
@@ -201,6 +202,7 @@ function publicPlayer(room, p) {
     eliminated: g ? g.out.includes(p.id) : false,
     peeking: !!p.peeking,
     look: p.look || 0,
+    avatar: p.avatar,
     wins: p.wins || 0,
   };
 }
@@ -383,7 +385,7 @@ function addBot(room) {
   if (room.players.length >= MAX_PLAYERS) return null;
   const used = new Set(room.players.map((p) => p.name));
   const name = BOT_NAME_POOL.find((n) => !used.has(n)) || `Bot ${room.players.length + 1}`;
-  const bot = { id: makeId(), token: makeId(), name, socketId: null, connected: true, isBot: true };
+  const bot = { id: makeId(), token: makeId(), name, socketId: null, connected: true, isBot: true, avatar: AV.randomAvatar() };
   room.players.push(bot);
   return bot;
 }
@@ -493,7 +495,7 @@ io.on('connection', (socket) => {
     return { room, player: findPlayer(room, socket.data.playerId) };
   };
 
-  socket.on('createRoom', ({ name } = {}, cb) => {
+  socket.on('createRoom', ({ name, avatar } = {}, cb) => {
     if (typeof cb !== 'function') return;
     try {
       if (isRateLimited(`createRoom:${getClientIp(socket)}`, 8, 60 * 1000)) {
@@ -504,7 +506,7 @@ io.on('connection', (socket) => {
       }
       name = cleanName(name);
       const room = createRoom();
-      const player = { id: makeId(), token: makeId(), name, socketId: socket.id, connected: true };
+      const player = { id: makeId(), token: makeId(), name, socketId: socket.id, connected: true, avatar: AV.cleanAvatar(avatar) || AV.randomAvatar() };
       room.hostId = player.id;
       room.players.push(player);
       socket.join(room.code);
@@ -519,7 +521,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('joinRoom', ({ code, name, token } = {}, cb) => {
+  socket.on('joinRoom', ({ code, name, token, avatar } = {}, cb) => {
     if (typeof cb !== 'function') return;
     if (isRateLimited(`joinRoom:${getClientIp(socket)}`, 30, 60 * 1000)) {
       return cb({ ok: false, error: 'Zu viele Versuche in kurzer Zeit. Bitte kurz warten und erneut versuchen.' });
@@ -551,7 +553,7 @@ io.on('connection', (socket) => {
     if (room.players.some((p) => p.name.toLowerCase() === name.toLowerCase())) {
       return cb({ ok: false, error: 'Dieser Name ist am Tisch bereits vergeben.' });
     }
-    const player = { id: makeId(), token: makeId(), name, socketId: socket.id, connected: true };
+    const player = { id: makeId(), token: makeId(), name, socketId: socket.id, connected: true, avatar: AV.cleanAvatar(avatar) || AV.randomAvatar() };
     room.players.push(player);
     if (!room.hostId) room.hostId = player.id;
     socket.join(room.code);
@@ -599,6 +601,17 @@ io.on('connection', (socket) => {
     if (target.socketId) io.to(target.socketId).emit('kicked');
     touchRoom(room);
     broadcastState(room);
+  });
+
+  // Charakter-Editor: Aussehen der eigenen Ente ändern (nur in der Lobby)
+  socket.on('setAvatar', (a) => {
+    const { room, player } = ctx();
+    if (!room || !player || room.phase !== 'lobby') return;
+    if (isRateLimited(`avatar:${player.id}`, 40, 10 * 1000)) return;
+    const clean = AV.cleanAvatar(a);
+    if (!clean) return;
+    player.avatar = clean;
+    touchRoom(room); broadcastState(room);
   });
 
   socket.on('addBot', () => {

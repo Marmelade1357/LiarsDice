@@ -24,6 +24,9 @@ async function main() {
     let peeks = [];
     guest.on('peek', (p) => peeks.push(p));
 
+    host.emit('setAvatar', { body: 2, top: 'shirt', topColor: 4, hat: 'bandana', hatColor: 1, patch: true, scarf: 0, evil: '<x>' });
+    const av = await waitForState(host, (s) => s.players[0].avatar && s.players[0].avatar.top === 'shirt');
+    assert(av.players[0].avatar.patch === true && av.players[0].avatar.scarf === 0 && !('evil' in av.players[0].avatar), 'Avatar wird übernommen und bereinigt');
     host.emit('addBot'); host.emit('addBot');
     host.emit('setSettings', { dice: 3, wildOnes: true, spotOn: true });
     const lobby = await waitForState(host, (s) => s.players.length === 4 && s.settings.dice === 3 && s.settings.spotOn);

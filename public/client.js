@@ -12,6 +12,7 @@
   const SOUND_KEY = 'liars_sound';
   const NAME_KEY = 'liars_name';
   const CREW_KEY = 'liars_crew';
+  const AVATAR_KEY = 'liars_avatar';
 
   function safeGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
   function safeSet(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* egal */ } }
@@ -23,7 +24,7 @@
   let soundOn = safeGet(SOUND_KEY) !== 'off';
   let peeking = false;
   let peekMap = {};           // playerId -> true (schaut gerade nach)
-  let sel = { qty: 1, face: 2, key: null, custom: false, sending: false };
+  let sel = { face: null, key: null, sending: false };
   let dismissedResult = null;
   let notifiedTurnKey = null;
   let revealBannerAt = 0;
@@ -187,6 +188,71 @@
   function loadSession() { try { const r = safeGet(SESSION_KEY); return r ? JSON.parse(r) : null; } catch (e) { return null; } }
 
   // ---------------------------------------------------------------------
+  // Charakter-Editor (eigene Ente)
+  // ---------------------------------------------------------------------
+  // Farben identisch zu src3d/duck.js
+  const PAL = {
+    body: [[0xf5f1e6, 0xf5f1e6], [0xf3c93a, 0xf3c93a], [0x8b6a47, 0x2f6e3e], [0x9c9ca4, 0x8a8a93], [0x6e4a2e, 0x6e4a2e], [0xe9e0c8, 0xc79a5c], [0x3b3b40, 0x3b3b40], [0xd9a36a, 0xd9a36a]],
+    top: [0x7a1e22, 0x1e3a66, 0x2c5a30, 0x5a3a20, 0x4c2a5e, 0x6a5a1c, 0x1c5a5a, 0x2e2e34],
+    hat: [0x1d1814, 0x5a3a20, 0x7a1e22, 0x1e3a66, 0x2c5a30, 0x4c2a5e],
+    bandana: [0xb3202a, 0x1f4aa0, 0x1d1814, 0x8a2a8a, 0x2a8a5a, 0xe0a020],
+    scarf: [0xb3202a, 0x1f4aa0, 0xe0a020, 0x8a2a8a, 0x2a8a5a],
+  };
+  const TOPS = [['coat', 'Mantel'], ['vest', 'Weste'], ['shirt', 'Ringelhemd']];
+  const HATS = [['tricorn', 'Dreispitz'], ['feather', 'mit Feder'], ['bandana', 'Kopftuch'], ['none', 'Ohne']];
+  const hex = (n) => '#' + n.toString(16).padStart(6, '0');
+  function randomAvatar() {
+    const p = (n) => Math.floor(Math.random() * n);
+    return { body: p(8), top: TOPS[p(3)][0], topColor: p(8), hat: HATS[p(3)][0], hatColor: p(6), patch: Math.random() < 0.35, scarf: 1 + p(5) };
+  }
+  let avatar = (() => { try { const a = JSON.parse(safeGet(AVATAR_KEY) || 'null'); if (a && typeof a.body === 'number') return a; } catch (e) { /* egal */ } return randomAvatar(); })();
+  function setAvatar(patch) {
+    avatar = Object.assign({}, avatar, patch);
+    safeSet(AVATAR_KEY, JSON.stringify(avatar));
+    renderEditor();
+    if (session) socket.emit('setAvatar', avatar);
+  }
+  function swatchRow(id, colors, key, withNone) {
+    const box = $(id); box.innerHTML = '';
+    if (withNone) {
+      const b = el('button', { class: 'swatch none' + (avatar[key] === 0 ? ' sel' : ''), type: 'button', title: 'Keins' });
+      b.addEventListener('click', () => setAvatar({ [key]: 0 })); box.appendChild(b);
+    }
+    colors.forEach((c, i) => {
+      const v = withNone ? i + 1 : i;
+      const bg = Array.isArray(c) ? `linear-gradient(135deg, ${hex(c[1])} 0 50%, ${hex(c[0])} 50% 100%)` : hex(c);
+      const b = el('button', { class: 'swatch' + (avatar[key] === v ? ' sel' : ''), type: 'button', style: `background:${bg}` });
+      b.addEventListener('click', () => setAvatar({ [key]: v }));
+      box.appendChild(b);
+    });
+  }
+  function segRow(id, opts, key) {
+    const box = $(id); box.innerHTML = '';
+    opts.forEach(([v, label]) => {
+      const b = el('button', { class: avatar[key] === v ? 'sel' : '', type: 'button', text: label });
+      b.addEventListener('click', () => setAvatar({ [key]: v }));
+      box.appendChild(b);
+    });
+  }
+  function renderEditor() {
+    swatchRow('av-body', PAL.body, 'body');
+    segRow('av-top', TOPS, 'top');
+    swatchRow('av-topColor', PAL.top, 'topColor');
+    segRow('av-hat', HATS, 'hat');
+    $('av-hatColor-row').classList.toggle('hidden', avatar.hat === 'none');
+    swatchRow('av-hatColor', avatar.hat === 'bandana' ? PAL.bandana : PAL.hat, 'hatColor');
+    swatchRow('av-scarf', PAL.scarf, 'scarf', true);
+    segRow('av-patch', [[false, 'Nein'], [true, 'Ja']], 'patch');
+    if (b3 && b3.setPreviewAvatar) b3.setPreviewAvatar(avatar);
+  }
+  $('btn-av-random').addEventListener('click', () => setAvatar(randomAvatar()));
+  function openEditor() {
+    renderEditor();
+    if (b3 && b3.initPreview) { hide($('av-preview-fallback')); b3.initPreview($('av-preview')); b3.setPreviewAvatar(avatar); }
+    else if (!mode3d) show($('av-preview-fallback'));
+  }
+
+  // ---------------------------------------------------------------------
   // Start / Lobby-Aktionen
   // ---------------------------------------------------------------------
   document.querySelectorAll('.tab-btn').forEach((b) => b.addEventListener('click', () => {
@@ -213,7 +279,7 @@
     const name = $('create-name').value.trim();
     if (!name) return toast('Bitte gib deinen Namen ein.');
     ctxUnlock();
-    socket.emit('createRoom', { name }, (res) => {
+    socket.emit('createRoom', { name, avatar }, (res) => {
       if (!res.ok) return toast(res.error);
       enterRoom(res, name);
     });
@@ -224,7 +290,7 @@
     if (!name) return toast('Bitte gib deinen Namen ein.');
     if (code.length !== 4) return toast('Der Raum-Code hat 4 Zeichen.');
     ctxUnlock();
-    socket.emit('joinRoom', { code, name }, (res) => {
+    socket.emit('joinRoom', { code, name, avatar }, (res) => {
       if (!res.ok) return toast(res.error);
       enterRoom(res, name);
     });
@@ -353,7 +419,8 @@
   function render(state, fresh) {
     if (state.phase === 'lobby') {
       hide($('result-modal')); dismissedResult = null;
-      showScreen('screen-lobby'); renderLobby(state); return;
+      const wasLobby = !$('screen-lobby').classList.contains('hidden');
+      showScreen('screen-lobby'); renderLobby(state); if (!wasLobby) openEditor(); return;
     }
     if ($('screen-game').classList.contains('hidden')) showScreen('screen-game');
     handleEvents(state, fresh || []);
@@ -396,7 +463,7 @@
       if (p.wins) tags.push(el('span', { class: 'tag', text: `🏆 ${p.wins}` }));
       if (!p.connected && !p.isBot) tags.push(el('span', { class: 'tag', text: 'getrennt' }));
       const li = el('li', { class: !p.connected && !p.isBot ? 'disconnected' : '' }, [
-        el('span', { class: 'player-name' }, [el('span', { text: p.name }), ...tags]),
+        el('span', { class: 'player-name' }, [el('span', { class: 'duck-dot', style: `background:${hex(PAL.body[(p.avatar && p.avatar.body) || 0][1])}` }), el('span', { text: p.name }), ...tags]),
       ]);
       if (isHost && p.id !== state.hostId) li.appendChild(removeButton(p));
       list.appendChild(li);
@@ -546,18 +613,11 @@
     const canBid = myTurn && !rolling && state.canRaise;
     const showCall = myTurn && !rolling && !!state.bid;
     const key = `${state.roundNo}:${state.turnNo}`;
-    if (sel.key !== key) {
-      sel.key = key; sel.custom = false; sel.sending = false;
-      const m = state.minRaise || { qty: 1, face: 2 };
-      sel.face = m.face; sel.qty = m.qty;
-    }
-    $('quick-bids').classList.toggle('hidden', !canBid || sel.custom);
-    $('bid-controls').classList.toggle('hidden', !canBid || !sel.custom);
-    $('btn-custom').classList.toggle('hidden', !canBid);
-    $('btn-custom').textContent = sel.custom ? '⚡ Schnell bieten' : '✎ Anderes Gebot';
+    if (sel.key !== key) { sel.key = key; sel.face = null; sel.sending = false; }
+    $('bid-flow').classList.toggle('hidden', !canBid);
     $('call-controls').classList.toggle('hidden', !showCall);
     $('btn-spot').classList.toggle('hidden', !state.settings.spotOn);
-    if (canBid) { if (sel.custom) renderBidPicker(state); else renderQuickBids(state); }
+    if (canBid) renderBidFlow(state);
 
     // Host: Nächste Runde / Überspringen (Überspringen nur ohne Zeitlimit nötig)
     const hc = $('host-controls'); hc.innerHTML = '';
@@ -613,70 +673,33 @@
   }
   setInterval(updateTurnClock, 200);
 
-  // ----- Schnell bieten: pro Augenzahl das kleinste erlaubte Gebot, ein Tipp bietet -----
-  function openingQty(state, f) {
-    // Eröffnung: Vorschlag aus den eigenen Würfeln (eigene Treffer + vorsichtige Schätzung der anderen)
-    const dice = myDice && myDice.round === state.roundNo ? myDice.dice : [];
-    const own = dice.filter((d) => d === f || (state.settings.wildOnes && d === 1 && f !== 1)).length;
-    const p = state.settings.wildOnes && f !== 1 ? 1 / 3 : 1 / 6;
-    return Math.max(1, Math.min(state.totalDice, own + Math.floor((state.totalDice - dice.length) * p * 0.6)));
-  }
+  // ----- Bieten: erst Augenzahl, dann Anzahl (ein Tipp auf die Anzahl bietet) -----
   function sendBid(qty, face) {
     if (sel.sending) return;
     sel.sending = true;
     socket.emit('bid', { qty, face }, (res) => { sel.sending = false; if (res && !res.ok) toast(res.error); });
   }
-  function renderQuickBids(state) {
-    const box = $('quick-bids'); box.innerHTML = '';
+  function renderBidFlow(state) {
     const minFace = state.settings.wildOnes ? 2 : 1;
-    const b = state.bid;
-    for (let f = minFace; f <= 6; f++) {
-      const q = b ? minQtyFor(state, f) : openingQty(state, f);
-      if (q > state.totalDice) continue;
-      let hint = '';
-      if (b && f === b.face) hint = '+1';
-      else if (b && f === b.face + 1) hint = 'gleich viele';
-      const btn = el('button', { class: 'quick-bid' + (hint ? ' hint' : ''), type: 'button', title: `Biete ${q} × ${f}er` }, [
-        el('span', { class: 'q', text: `${q}×` }), dieEl(f),
-      ]);
-      if (hint) btn.appendChild(el('span', { class: 'tag-hint', text: hint }));
-      btn.addEventListener('click', () => sendBid(q, f));
-      box.appendChild(btn);
-    }
-  }
-  $('btn-custom').addEventListener('click', () => {
-    sel.custom = !sel.custom;
-    if (latestState) renderControls(latestState);
-  });
-
-  function renderBidPicker(state) {
-    const minFace = state.settings.wildOnes ? 2 : 1;
-    const fp = $('face-picker'); fp.innerHTML = '';
+    const fr = $('face-row'); fr.innerHTML = '';
     for (let f = minFace; f <= 6; f++) {
       const minQ = minQtyFor(state, f);
       const b = el('button', { class: 'face-btn' + (f === sel.face ? ' sel' : ''), type: 'button', title: `${f}er` }, [dieEl(f)]);
       b.disabled = minQ > state.totalDice;
-      b.addEventListener('click', () => {
-        sel.face = f;
-        sel.qty = Math.max(sel.qty, minQtyFor(state, f));
-        if (sel.qty > state.totalDice) sel.qty = state.totalDice;
-        renderBidPicker(state);
-      });
-      fp.appendChild(b);
+      b.addEventListener('click', () => { sel.face = f; renderBidFlow(state); });
+      fr.appendChild(b);
     }
+    const qs = $('qty-step'); const qr = $('qty-row'); qr.innerHTML = '';
+    qs.classList.toggle('waiting', !sel.face);
+    if (!sel.face) { qr.appendChild(el('span', { class: 'qty-hint', text: '← erst eine Augenzahl wählen' })); return; }
     const minQ = minQtyFor(state, sel.face);
-    if (sel.qty < minQ) sel.qty = minQ;
-    $('qty-value').textContent = sel.qty;
-    $('qty-minus').disabled = sel.qty <= minQ;
-    $('qty-plus').disabled = sel.qty >= state.totalDice;
-    $('btn-bid').disabled = minQ > state.totalDice;
-    $('btn-bid').innerHTML = '';
-    $('btn-bid').appendChild(document.createTextNode(`Biete ${sel.qty} ×`));
-    $('btn-bid').appendChild(dieEl(sel.face, 'sm'));
+    for (let q = minQ; q <= state.totalDice; q++) {
+      const b = el('button', { class: 'qty-btn', type: 'button', title: `Biete ${q} × ${sel.face}er` }, [el('span', { text: `${q}×` }), dieEl(sel.face, 'sm')]);
+      b.addEventListener('click', () => sendBid(q, sel.face));
+      qr.appendChild(b);
+    }
   }
-  $('qty-minus').addEventListener('click', () => { if (!latestState) return; sel.qty--; renderBidPicker(latestState); });
-  $('qty-plus').addEventListener('click', () => { if (!latestState) return; sel.qty++; renderBidPicker(latestState); });
-  $('btn-bid').addEventListener('click', () => sendBid(sel.qty, sel.face));
+
   $('btn-liar').addEventListener('click', () => socket.emit('callLiar', null, (res) => { if (res && !res.ok) toast(res.error); }));
   $('btn-spot').addEventListener('click', () => socket.emit('callSpot', null, (res) => { if (res && !res.ok) toast(res.error); }));
 
@@ -779,6 +802,7 @@
       m.setVisible(!$('screen-game').classList.contains('hidden'));
       sync3d(false);
       if (peeking) m.setMyPeek(true);
+      if (!$('screen-lobby').classList.contains('hidden')) openEditor();
     } catch (e) {
       console.error('3D nicht verfügbar', e);
       mode3d = false;
@@ -791,7 +815,7 @@
     if (!b3 || !s || s.phase === 'lobby') return;
     b3.update({
       meId: myId(),
-      players: s.players.map((p) => ({ id: p.id, name: p.name, dice: p.dice, eliminated: p.eliminated, connected: p.connected, isBot: p.isBot, isHost: p.isHost, peeking: p.peeking, look: p.look })),
+      players: s.players.map((p) => ({ id: p.id, name: p.name, dice: p.dice, eliminated: p.eliminated, connected: p.connected, isBot: p.isBot, isHost: p.isHost, peeking: p.peeking, look: p.look, avatar: p.avatar })),
       currentTurnId: s.rollMs > 0 ? null : s.currentTurnId,
       bid: s.bid,
       gamePhase: s.gamePhase,

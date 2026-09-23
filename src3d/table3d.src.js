@@ -6,7 +6,7 @@
 
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { buildDuck } from './duck.js';
+import { buildDuck, DUCK_PALETTES } from './duck.js';
 import * as S from './scenery.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
@@ -888,7 +888,8 @@ const duckHelpers = {
   mergeGeometries: (list) => mergeGeometries(list.map((gg) => { const k = gg.index ? gg.toNonIndexed() : gg; const n = new THREE.BufferGeometry(); ['position', 'normal', 'uv'].forEach((a) => { if (k.attributes[a]) n.setAttribute(a, k.attributes[a]); }); return n; })),
   batchStatic: (root, local) => batchStatic(root, local),
 };
-function buildCharacter(id, isMe) { return buildDuck(id, isMe, duckHelpers); }
+function buildCharacter(id, isMe, avatar) { return buildDuck(id, isMe, duckHelpers, avatar); }
+export const palettes = DUCK_PALETTES;
 
 let skullTex = null;
 function skullTexture() {
@@ -1032,7 +1033,7 @@ function paintCenter(sp, info) {
 // ---------------------------------------------------------------------------
 function makeSeat(p, isMe) {
   const frame = new THREE.Group(); scene.add(frame);
-  const parts = buildCharacter(p.id, isMe);
+  const parts = buildCharacter(p.id, isMe, p.avatar);
   frame.add(parts.g);
   const cupRoot = new THREE.Group(); scene.add(cupRoot);
   const tiltG = new THREE.Group(); tiltG.position.set(0, 0, -CUP_RM); cupRoot.add(tiltG);
@@ -1060,7 +1061,7 @@ function removeSeat(s) {
 
 function layoutSeats(view) {
   const players = view.players; const n = players.length;
-  const key = players.map((p) => p.id).join(',') + '|' + view.meId;
+  const key = players.map((p) => p.id + ':' + JSON.stringify(p.avatar || null)).join(',') + '|' + view.meId;
   if (key === tableKey) return false;
   tableKey = key;
   buildTable(n);
@@ -1071,8 +1072,9 @@ function layoutSeats(view) {
     const p = players[(meIdx + i) % n];
     let s = seats[p.id];
     const isMe = p.id === view.meId;
-    if (s && s.isMe !== isMe) { removeSeat(s); delete seats[p.id]; s = null; }
-    if (!s) { s = seats[p.id] = makeSeat(p, isMe); scaleSprites(s); }
+    const avKey = JSON.stringify(p.avatar || null);
+    if (s && (s.isMe !== isMe || s.avKey !== avKey)) { removeSeat(s); delete seats[p.id]; s = null; }
+    if (!s) { s = seats[p.id] = makeSeat(p, isMe); s.avKey = avKey; scaleSprites(s); }
     const a = Math.PI / 2 + (i * Math.PI * 2) / n;
     const dx = Math.cos(a), dz = Math.sin(a);
     s.dir = new THREE.Vector3(dx, 0, dz);
@@ -1963,4 +1965,62 @@ export function debugGallery(ids, lid) {
     out.push([g.position.x, g.position.z]);
   });
   return out;
+}
+
+
+// ---------------------------------------------------------------------------
+// Vorschau für den Charakter-Editor in der Lobby (eigener kleiner Renderer)
+// ---------------------------------------------------------------------------
+let pv = null;
+export function initPreview(host) {
+  if (pv) { if (pv.canvas.parentNode !== host) host.appendChild(pv.canvas); return; }
+  const canvas = document.createElement('canvas');
+  canvas.className = 'preview-canvas';
+  host.appendChild(canvas);
+  const r = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+  r.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  r.toneMapping = THREE.ACESFilmicToneMapping; r.toneMappingExposure = 1.1;
+  r.shadowMap.enabled = true;
+  const sc = new THREE.Scene();
+  sc.add(new THREE.HemisphereLight(0xffe8d0, 0x4a3a30, 1.1));
+  const key = new THREE.DirectionalLight(0xffd8b0, 2.4); key.position.set(-2, 4, -3); key.castShadow = true; sc.add(key);
+  const rim = new THREE.DirectionalLight(0x9fc4ff, 1.2); rim.position.set(3, 2, 3); sc.add(rim);
+  const ground = new THREE.Mesh(new THREE.CircleGeometry(0.7, 40), new THREE.MeshStandardMaterial({ color: 0xd9bf8a, roughness: 1 }));
+  ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; sc.add(ground);
+  const cam = new THREE.PerspectiveCamera(32, 1, 0.05, 20);
+  cam.position.set(0, 1.02, -1.55); cam.lookAt(0, 0.78, 0);
+  const holder = new THREE.Group(); sc.add(holder);
+  pv = { canvas, r, sc, cam, holder, spin: 0, drag: null, avKey: '' };
+  canvas.addEventListener('pointerdown', (e) => { pv.drag = { x: e.clientX, spin: pv.spin }; try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* egal */ } });
+  canvas.addEventListener('pointermove', (e) => { if (pv.drag) pv.spin = pv.drag.spin + (e.clientX - pv.drag.x) * 0.012; });
+  canvas.addEventListener('pointerup', () => { pv.drag = null; pv.idleFrom = performance.now(); });
+  let last = performance.now();
+  r.setAnimationLoop(() => {
+    if (!canvas.isConnected || canvas.offsetParent === null) return;
+    const w = canvas.clientWidth, hh = canvas.clientHeight;
+    if (w && hh && (canvas.width !== Math.round(w * r.getPixelRatio()) || canvas.height !== Math.round(hh * r.getPixelRatio()))) { r.setSize(w, hh, false); cam.aspect = w / hh; cam.updateProjectionMatrix(); }
+    const now = performance.now(); const dt = Math.min(0.05, (now - last) / 1000); last = now;
+    if (!pv.drag && (!pv.idleFrom || now - pv.idleFrom > 2500)) pv.spin += dt * 0.5;
+    holder.rotation.y = pv.spin;
+    if (pv.parts) {
+      const bt = ((now / 1000) % 3.7);
+      const blink = bt < 0.15 ? Math.sin((bt / 0.15) * Math.PI) : 0;
+      (pv.parts.lids || []).forEach((l) => { l.pivot.rotation.x = THREE.MathUtils.lerp(l.open, l.closed, Math.max(0.06, blink)); });
+      if (pv.parts.head) pv.parts.head.rotation.set(0.05, Math.sin(now / 1400) * 0.25, Math.sin(now / 2100) * 0.05);
+    }
+    r.render(sc, cam);
+  });
+}
+export function setPreviewAvatar(av) {
+  if (!pv) return;
+  const key = JSON.stringify(av);
+  if (key === pv.avKey) return;
+  pv.avKey = key;
+  while (pv.holder.children.length) pv.holder.remove(pv.holder.children[0]);
+  const parts = buildDuck('preview', false, duckHelpers, av);
+  const sh = parts.shoulder;
+  parts.arms.forEach((a) => solveArm(a, new THREE.Vector3(a.side * sh.x, sh.y, sh.z), new THREE.Vector3(a.side * 0.2, 0.62, -0.22)));
+  parts.g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+  pv.holder.add(parts.g);
+  pv.parts = parts;
 }

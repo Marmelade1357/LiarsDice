@@ -119,6 +119,29 @@ input[type="checkbox"] { width: auto; }
 .lobby-settings label { font-size: 0.85rem; color: var(--text-dim); }
 .check-label { display: flex; align-items: center; gap: 8px; cursor: pointer; color: var(--text) !important; }
 
+/* ---------------- Charakter-Editor ---------------- */
+.lobby-layout { display: flex; gap: 18px; align-items: flex-start; justify-content: center; flex-wrap: wrap; width: 100%; }
+.lobby-layout > .card { flex: 1 1 380px; max-width: 460px; }
+.editor-card { padding: 20px 22px; }
+.editor-head { display: flex; justify-content: space-between; align-items: center; }
+.editor-head h3 { margin: 0; }
+.av-preview { position: relative; height: 260px; margin: 8px -6px 0; border-radius: 12px; overflow: hidden;
+  background: radial-gradient(ellipse at 50% 35%, #f6c89a 0%, #d98f62 45%, #3a5a7a 100%); }
+.preview-canvas { width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+.av-fallback { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 5rem; }
+.drag-hint { text-align: center; margin: 4px 0 10px; font-size: 0.75rem; }
+.av-row { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
+.av-label { flex: 0 0 92px; font-size: 0.82rem; color: var(--text-dim); }
+.swatches { display: flex; flex-wrap: wrap; gap: 6px; }
+.swatch { width: 28px; height: 28px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.25); cursor: pointer; padding: 0; position: relative; box-shadow: inset 0 -3px 0 rgba(0,0,0,0.2); }
+.swatch.sel { border-color: var(--gold-bright); box-shadow: 0 0 0 2px rgba(244,213,141,0.45); transform: scale(1.1); }
+.swatch.none { background: repeating-linear-gradient(45deg, #2a3a4a 0 4px, #1a2632 4px 8px); }
+.swatch.none::after { content: '✕'; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; color: var(--text-dim); }
+.seg { display: flex; flex-wrap: wrap; gap: 4px; }
+.seg button { padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-alt); color: var(--text-dim); font-size: 0.8rem; cursor: pointer; font-weight: 600; }
+.seg button.sel { background: var(--accent); border-color: var(--gold); color: #1a1205; }
+.player-list .duck-dot { width: 14px; height: 14px; border-radius: 50%; display: inline-block; border: 2px solid rgba(255,255,255,0.3); flex: 0 0 auto; }
+
 /* ---------------- Spiel ---------------- */
 .game-header {
   position: absolute; left: 0; right: 0; top: 0; height: var(--header-h); z-index: 40;
@@ -238,6 +261,19 @@ input[type="checkbox"] { width: auto; }
 }
 .custom-btn { white-space: nowrap; }
 
+/* Bieten: 1. Augenzahl, 2. Anzahl */
+.bid-flow { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; justify-content: center; }
+.bid-step { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.step-lbl { font-size: 0.72rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; }
+.face-row { display: flex; gap: 5px; }
+.qty-row { display: flex; gap: 5px; overflow-x: auto; max-width: min(46vw, 520px); scrollbar-width: thin; padding: 2px; }
+.qty-btn { display: inline-flex; align-items: center; gap: 3px; flex: 0 0 auto; cursor: pointer; padding: 6px 9px; border-radius: 10px;
+  border: 1px solid rgba(217,179,106,0.5); background: linear-gradient(180deg, #213d55, #152a3c); color: var(--text); font: 800 1rem var(--serif); }
+.qty-btn:hover { filter: brightness(1.2); transform: translateY(-1px); }
+.qty-btn:first-child { border-color: var(--gold-bright); }
+.qty-hint { color: var(--text-dim); font-size: 0.8rem; font-style: italic; white-space: nowrap; }
+.bid-step.waiting .step-lbl { opacity: 0.5; }
+
 /* Zug-Timer */
 .turn-timer { position: absolute; left: 0; right: 0; top: -1px; height: 4px; background: rgba(255,255,255,0.08); overflow: hidden; }
 .turn-timer i { display: block; height: 100%; width: 100%; background: linear-gradient(90deg, #d9b36a, #f4d58d); transition: width 0.2s linear, background 0.3s; }
@@ -298,13 +334,20 @@ input[type="checkbox"] { width: auto; }
   .row-a { flex-wrap: nowrap; }
   .peek-btn { flex: 0 0 auto; padding: 8px 10px; }
   .peek-btn .lbl-short { display: none; }
+  .bid-flow { gap: 6px; width: 100%; max-width: 100%; min-width: 0; flex-direction: column; align-items: stretch; }
+  .bid-step { justify-content: flex-start; min-width: 0; max-width: 100%; }
+  .step-lbl { flex: 0 0 64px; white-space: normal; line-height: 1.1; }
+  .qty-row { max-width: none; flex: 1 1 0; min-width: 0; }
+  .row-a, .controls-row { min-width: 0; max-width: 100%; }
+  .step-lbl { font-size: 0.62rem; }
   .quick-bids { flex-wrap: nowrap; gap: 4px; flex: 1 1 auto; justify-content: space-between; min-width: 0; }
   .quick-bid { padding: 5px 6px; font-size: 0.92rem; gap: 3px; flex: 1 1 0; justify-content: center; min-width: 0; }
   .quick-bid .die { --s: 24px; }
   .quick-bid .tag-hint { font-size: 0.55rem; padding: 0 4px; top: -8px; }
   .bid-controls { gap: 5px; flex-wrap: wrap; }
   .face-btn .die { --s: 26px; }
-  .row-a:has(#bid-controls:not(.hidden)) { flex-wrap: wrap; }
+  .row-a:has(#bid-flow:not(.hidden)) { flex-wrap: wrap; }
+  .row-a:has(#bid-flow:not(.hidden)) .peek-btn { order: 2; }
   .btn.liar { padding: 9px 14px; }
   .game-header { padding: 7px 8px; }
   .round-badge .extra { display: none; }
@@ -319,6 +362,8 @@ input[type="checkbox"] { width: auto; }
   .controls-row { gap: 6px; }
   .peek-btn { padding: 8px 10px; font-size: 0.85rem; }
   .card { padding: 22px; }
+  .av-preview { height: 220px; }
+  .av-label { flex-basis: 78px; }
   .banner { font-size: 0.95rem; padding: 8px 12px; }
   .banner .big { font-size: 1.1rem; }
 }

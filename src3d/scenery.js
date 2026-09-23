@@ -160,11 +160,22 @@ function leafTexture() {
 }
 
 
+export const windUniforms = { time: { value: 0 }, gust: { value: 0.5 } };
 let frondMat = null, trunkMat = null, nutMat = null;
 export function buildPalm(x, z, height, leanX, leanZ, seed) {
   const r = rng(seed * 7919 + 13);
   if (!frondMat) {
     frondMat = new THREE.MeshStandardMaterial({ vertexColors: true, map: leafTexture(), alphaTest: 0.4, alphaToCoverage: true, side: THREE.DoubleSide, roughness: 0.72 });
+    // Wind im Vertex-Shader: Wiegen der Wedel (wind.x = Abstand zur Krone) und Flattern der Blättchen (wind.y)
+    frondMat.onBeforeCompile = (sh) => {
+      sh.uniforms.wTime = windUniforms.time; sh.uniforms.wGust = windUniforms.gust;
+      sh.vertexShader = sh.vertexShader
+        .replace('#include <common>', '#include <common>\nattribute vec3 wind; uniform float wTime; uniform float wGust;')
+        .replace('#include <begin_vertex>', `#include <begin_vertex>
+          float wa = sin(wTime * 1.3 + wind.z) * 0.05 * (0.7 + wGust) + wGust * 0.03;
+          float wb = sin(wTime * 0.9 + wind.z) * 0.03 * (0.7 + wGust) + sin(wTime * 6.5 + wind.z * 3.0) * 0.006 * wGust;
+          transformed.y += wind.x * wa + wind.y * wb;`);
+    };
     trunkMat = new THREE.MeshStandardMaterial({ map: trunkTexture(), vertexColors: true, roughness: 0.95, emissive: 0x24180e, emissiveIntensity: 1 });
     nutMat = new THREE.MeshStandardMaterial({ color: 0x5a3f22, roughness: 0.6 });
   }
@@ -187,19 +198,25 @@ export function buildPalm(x, z, height, leanX, leanZ, seed) {
   g.add(mk(trunkGeo, trunkMat));
   const crown = new THREE.Group(); crown.position.copy(top); g.add(crown);
   const bulb = mk(new THREE.SphereGeometry(0.2, 12, 10), trunkMat); bulb.scale.set(1, 0.8, 1); crown.add(bulb);
+  // Alle Wedel einer Palme in EIN Mesh (ein Zeichenaufruf statt ~13); der Wind bewegt sie im Shader
   const fronds = [];
   const n = 11 + Math.floor(r() * 3);
+  const geos = [];
   for (let i = 0; i < n; i++) {
     const dead = i >= n - 2;
     const L = (2.3 + r() * 0.8) * (height / 5.5 * 0.4 + 0.6);
     const elev = dead ? -0.2 : 0.25 + r() * 0.55;
-    const holder = new THREE.Group();
-    holder.rotation.y = (i / n) * Math.PI * 2 + r() * 0.4;
-    holder.add(mk(frondGeometry(L, elev, r, dead), frondMat, true, false));
-    holder.userData.dynamic = true;
-    crown.add(holder);
-    fronds.push({ obj: holder, base: 0, ph: i * 0.7 + seed });
+    const fg = frondGeometry(L, elev, r, dead);
+    const pa = fg.attributes.position; const w = new Float32Array(pa.count * 3);
+    const ph = i * 0.7 + seed;
+    for (let k = 0; k < pa.count; k++) { w[k * 3] = pa.getX(k); w[k * 3 + 1] = pa.getZ(k); w[k * 3 + 2] = ph; }
+    fg.setAttribute('wind', new THREE.BufferAttribute(w, 3));
+    fg.rotateY((i / n) * Math.PI * 2 + r() * 0.4);
+    geos.push(fg);
   }
+  const crownMesh = mk(mergeGeometries(geos), frondMat, true, false);
+  crownMesh.userData.dynamic = true;
+  crown.add(crownMesh);
   for (let i = 0; i < 5; i++) {
     const nut = mk(new THREE.SphereGeometry(0.11, 12, 10), nutMat);
     nut.scale.set(1, 1.1, 1);

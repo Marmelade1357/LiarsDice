@@ -15,6 +15,74 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
 let composer = null, bloomPass = null, aoPass = null, gradePass = null, perfSamples = [];
+// Grafik-Qualität: 'auto' (nach Gerät, stuft sich bei Ruckeln selbst herunter) oder fest 'low' | 'medium' | 'high'
+let qualityPref = 'auto', qualityLevel = 'high';
+export function setQuality(q) {
+  qualityPref = ['auto', 'low', 'medium', 'high'].includes(q) ? q : 'auto';
+  if (renderer) applyQuality();
+  return qualityLevel;
+}
+export function getQuality() { return { pref: qualityPref, level: qualityLevel }; }
+function disposeComposer() {
+  if (!composer) return;
+  composer.passes.forEach((p) => { if (p.dispose) p.dispose(); });
+  composer.renderTarget1.dispose(); composer.renderTarget2.dispose();
+  composer = null; aoPass = null; bloomPass = null; gradePass = null;
+}
+function buildComposer(withAo) {
+    try {
+    // Mehrfach-Abtastung (MSAA) im Zwischenpuffer, sonst gehen mit Nachbearbeitung die glatten Kanten verloren
+    const rt = new THREE.WebGLRenderTarget(256, 256, { type: THREE.HalfFloatType, samples: renderer.capabilities.isWebGL2 ? 4 : 0 });
+    composer = new EffectComposer(renderer, rt);
+    composer.addPass(new RenderPass(scene, camera));
+    // Umgebungsverdeckung: weiche Kontaktschatten unter Bechern, Enten, Kisten
+    if (withAo) try {
+      aoPass = new GTAOPass(scene, camera, 256, 256);
+      aoPass.updateGtaoMaterial({ radius: 0.32, distanceExponent: 1.4, thickness: 1.2, scale: 1.1, samples: 12, distanceFallOff: 1 });
+      aoPass.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 12 });
+      aoPass.blendIntensity = 0.85;
+      // Sprites (Namensschilder, Leuchten), Transparentes und den Himmel nicht in die Verdeckung einrechnen
+      aoPass._overrideVisibility = function () {
+        const cache = this._visibilityCache;
+        this.scene.traverse((o) => {
+          if (!o.visible) return;
+          if (o.isSprite || o.isPoints || o.isLine || o === sky || (o.material && !Array.isArray(o.material) && (o.material.transparent || o.material.alphaTest > 0))) { o.visible = false; cache.push(o); }
+        });
+      };
+      composer.addPass(aoPass);
+    } catch (e) { aoPass = null; }
+    bloomPass = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.32, 0.55, 0.86);
+    composer.addPass(bloomPass);
+    composer.addPass(new OutputPass());
+    gradePass = new ShaderPass(GradeShader);
+    composer.addPass(gradePass);
+  } catch (e) { composer = null; }
+}
+const QUALITY = {
+  low: { dpr: 1.25, shadows: false, shadowSize: 1024, composer: false, ao: false, fx: false },
+  medium: { dpr: 1.5, shadows: true, shadowSize: 1024, composer: true, ao: false, fx: true },
+  high: { dpr: 2, shadows: true, shadowSize: 2048, composer: true, ao: true, fx: true },
+  mobile: { dpr: 1.5, shadows: true, shadowSize: 1024, composer: false, ao: false, fx: true }, // "Auto" auf schwächeren Geräten
+};
+let qFlags = QUALITY.high;
+function applyQuality(flagsOverride) {
+  const key = qualityPref === 'auto' ? (lowEnd ? 'mobile' : 'high') : qualityPref;
+  const f = flagsOverride || QUALITY[key];
+  qFlags = f;
+  qualityLevel = f === QUALITY.mobile ? 'medium' : (Object.keys(QUALITY).find((k) => QUALITY[k] === f) || 'custom');
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, f.dpr));
+  if (renderer.shadowMap.enabled !== f.shadows) {
+    renderer.shadowMap.enabled = f.shadows;
+    scene.traverse((o) => { if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => { m.needsUpdate = true; }); });
+  }
+  if (sunLight.shadow.mapSize.x !== f.shadowSize) { sunLight.shadow.mapSize.set(f.shadowSize, f.shadowSize); if (sunLight.shadow.map) { sunLight.shadow.map.dispose(); sunLight.shadow.map = null; } }
+  sunLight.castShadow = f.shadows;
+  disposeComposer();
+  if (f.composer) buildComposer(f.ao);
+  if (atmo.prints) atmo.prints.visible = f.fx;
+  perfSamples = [];
+  resize();
+}
 // Farbfilter (nach dem Tone-Mapping): etwas mehr Kontrast und Wärme, leichte Vignette
 const GradeShader = {
   uniforms: { tDiffuse: { value: null }, night: { value: 0 }, vignette: { value: 0.28 } },
@@ -68,6 +136,24 @@ let lastChallenge = null;
 // Zuschauen (nach dem Ausscheiden): fremde Würfel sichtbar, Kamera hinter einer anderen Ente
 let spectId = null, spectDice = null, camSmooth = false;
 export function setSpectate(id) { spectId = id || null; camSmooth = true; }
+// Kamera über die Schulter der gewählten Ente (eye/_q1 werden angepasst), weich überblendet
+function spectCam(eye, dt, v) {
+  // Zuschauer-Kamera: über die Schulter der gewählten Ente, weich überblendet
+  const spS = spectId && seats[spectId] && !seats[spectId].isMe ? seats[spectId] : null;
+  if (spS && !introStart && !(winFocus && !winFocus.released && v.phase === 'gameover')) {
+    _v1.set(0.32, 1.62, 0.82); spS.frame.localToWorld(_v1);
+    _v2.set(0, TABLE_Y + 0.05, -(seatR - tableR) - 0.55); spS.frame.localToWorld(_v2);
+    _m.lookAt(_v1, _v2, _up); _q2.setFromRotationMatrix(_m);
+    _e.setFromQuaternion(_q2, 'YXZ'); _e.y += yaw; _e.x += (pitch - basePitch) * 0.8; _q2.setFromEuler(_e);
+    eye.copy(_v1); _q1.copy(_q2);
+  }
+  if (camSmooth) {
+    const k = Math.min(1, dt * 3.5);
+    camera.position.lerp(eye, k); camera.quaternion.slerp(_q1, k);
+    if (camera.position.distanceTo(eye) < 0.01) camSmooth = !!spS;
+    _q1.copy(camera.quaternion); eye.copy(camera.position);
+  }
+}
 // Kameraflug zum Spielstart und Kamerafahrt zur Siegerente
 let introStart = 0, winFocus = null;
 const INTRO_MS = 3600;
@@ -538,6 +624,8 @@ function makeShip(o) {
   const g = S.buildShipModel(o, jollyRogerTexture(), shipWindows);
   const flag = g.userData.flag;
   if (flag) flags.push({ mesh: flag, base: flag.geometry.attributes.position.array.slice(), ph: o.x, amp: 0.25 });
+  if (flag) flag.userData.dynamic = true;
+  batchStatic(g, true); // Rumpf, Masten, Segel, Takelage: wenige Meshes statt ~40
   g.position.set(o.x, -0.35, o.z);
   g.rotation.y = o.rot || 0;
   g.scale.setScalar(o.scale || 1);
@@ -808,7 +896,7 @@ function buildAtmosphere() {
   const fp = new THREE.InstancedMesh(fpGeo, fpMat, prints.length);
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), one = new THREE.Vector3(1, 1, 1), p3 = new THREE.Vector3(), yAx = new THREE.Vector3(0, 1, 0);
   prints.forEach((pr, i) => { p3.set(pr.x, sandY(pr.x, pr.z) + 0.006, pr.z); q.setFromAxisAngle(yAx, pr.a + Math.PI); m4.compose(p3, q, one); fp.setMatrixAt(i, m4); });
-  fp.userData.dynamic = true; fp.renderOrder = 1; scene.add(fp);
+  fp.userData.dynamic = true; fp.renderOrder = 1; scene.add(fp); atmo.prints = fp;
   // Nebelbänder über dem Wasser (nur in der Nacht/Schlussrunde)
   const cv = mkCanvas(4, 64); const c = cv.getContext('2d');
   const g = c.createLinearGradient(0, 0, 0, 64);
@@ -822,7 +910,9 @@ function buildAtmosphere() {
   });
 }
 function updateAtmosphere(dt) {
+  if (!qFlags.fx) { atmo.systems.forEach((sys) => { sys.pts.visible = false; }); return; }
   atmo.systems.forEach((sys) => {
+    if (sys.kind !== 'flies') sys.pts.visible = true;
     const pos = sys.pts.geometry.attributes.position, col = sys.pts.geometry.attributes.color;
     if (sys.kind === 'sparks') {
       const k = 0.7 + nightCur * 0.6;
@@ -943,14 +1033,22 @@ function addHoops(b, r, h) {
 // Tisch (wächst mit der Spielerzahl)
 // ---------------------------------------------------------------------------
 // Statische Deko zu wenigen großen Meshes zusammenfassen (ein Draw-Call pro Material statt hunderte)
+// Materialien mit gleichen Eigenschaften gelten als gleich (viele Deko-Teile erzeugen eigene, aber
+// identische Materialien) - so lassen sie sich zu einem Mesh zusammenfassen.
+function matKey(m) {
+  if (!m.isMeshStandardMaterial && !m.isMeshBasicMaterial) return m.uuid;
+  const h = (c) => (c ? c.getHexString() : '-');
+  return [m.type, h(m.color), m.roughness, m.metalness, m.map ? m.map.uuid : '-', h(m.emissive), m.emissiveIntensity, m.vertexColors, m.side, m.flatShading,
+    m.alphaTest, m.normalMap ? m.normalMap.uuid : '-', m.isMeshPhysicalMaterial ? [m.sheen, m.sheenRoughness, h(m.sheenColor), m.clearcoat, m.clearcoatRoughness].join(',') : ''].join('|');
+}
 function batchStatic(root, local) {
   root.updateMatrixWorld(true);
   const inv = new THREE.Matrix4().copy(root.matrixWorld).invert();
   const groups = new Map();
   (function walk(o) {
     if (o.userData.dynamic && o !== root) return;
-    if (o.isMesh && !o.isInstancedMesh && o.material && !Array.isArray(o.material) && !o.material.transparent && o.geometry.attributes.uv) {
-      const key = `${o.material.uuid}|${o.castShadow}|${o.receiveShadow}`;
+    if (o.isMesh && !o.isInstancedMesh && o.material && !Array.isArray(o.material) && !o.material.transparent && o.geometry.attributes.normal && (o.geometry.attributes.uv || !o.material.map)) {
+      const key = `${matKey(o.material)}|${o.castShadow}|${o.receiveShadow}`;
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key).push(o);
     }
@@ -959,18 +1057,21 @@ function batchStatic(root, local) {
   let merged = 0;
   groups.forEach((list) => {
     if (list.length < 2) return;
-    const withColor = list.every((o) => o.geometry.attributes.color);
+    const mat = list[0].material;
+    const withColor = !!mat.vertexColors && list.every((o) => o.geometry.attributes.color);
+    if (mat.vertexColors && !withColor) return;
     const attrs = withColor ? ['position', 'normal', 'uv', 'color'] : ['position', 'normal', 'uv'];
     const geos = list.map((o) => {
       let g2 = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone();
       const keep = new THREE.BufferGeometry();
       attrs.forEach((a) => { if (g2.attributes[a]) keep.setAttribute(a, g2.attributes[a]); });
+      if (!keep.attributes.uv) keep.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(keep.attributes.position.count * 2), 2));
       keep.applyMatrix4(local ? new THREE.Matrix4().multiplyMatrices(inv, o.matrixWorld) : o.matrixWorld);
       return keep;
     });
     const geo = mergeGeometries(geos, false);
     if (!geo) return;
-    const m = new THREE.Mesh(geo, list[0].material);
+    const m = new THREE.Mesh(geo, mat);
     m.castShadow = list[0].castShadow; m.receiveShadow = list[0].receiveShadow;
     root.add(m);
     list.forEach((o) => { if (o.parent) o.parent.remove(o); });
@@ -1087,12 +1188,38 @@ function makeCup(seed) {
   return g;
 }
 
-const dieGeo = new THREE.BoxGeometry(DIE, DIE, DIE);
-// Reihenfolge der Box-Materialien: +x, -x, +y, -y, +z, -z
+// Reihenfolge der Box-Seiten: +x, -x, +y, -y, +z, -z
 const FACE_ORDER = [2, 5, 1, 6, 3, 4];
+// Ein Würfel = ein Zeichenaufruf: alle sechs Seiten liegen in einer Textur (3 × 2 Felder)
+let dieAtlas = null;
+function dieAtlasTexture() {
+  if (dieAtlas) return dieAtlas;
+  const cv = mkCanvas(384, 256); const c = cv.getContext('2d');
+  for (let v = 1; v <= 6; v++) {
+    const src = dieTexture(v).image;
+    c.drawImage(src, ((v - 1) % 3) * 128, Math.floor((v - 1) / 3) * 128);
+  }
+  dieAtlas = canvasTex(cv);
+  return dieAtlas;
+}
+const dieGeo = (() => {
+  const g = new THREE.BoxGeometry(DIE, DIE, DIE);
+  g.clearGroups();
+  const uv = g.attributes.uv;
+  for (let f = 0; f < 6; f++) {
+    const v = FACE_ORDER[f], col = (v - 1) % 3, row = Math.floor((v - 1) / 3);
+    for (let k = 0; k < 4; k++) {
+      const i = f * 4 + k;
+      const u0 = uv.getX(i) * 0.96 + 0.02, v0 = uv.getY(i) * 0.96 + 0.02; // kleiner Rand gegen Überlaufen der Nachbarfelder
+      uv.setXY(i, (col + u0) / 3, 1 - (row + 1) / 2 + v0 / 2);
+    }
+  }
+  return g;
+})();
+function dmat(m) { return Array.isArray(m.material) ? m.material : [m.material]; }
 function makeDie(value, yawRot) {
-  const mats = FACE_ORDER.map((v) => new THREE.MeshStandardMaterial({ map: dieTexture(v), roughness: 0.45, emissive: 0xffc040, emissiveIntensity: 0 }));
-  const m = mesh(dieGeo, mats);
+  const mat = new THREE.MeshStandardMaterial({ map: dieAtlasTexture(), roughness: 0.45, emissive: 0xffc040, emissiveIntensity: 0 });
+  const m = mesh(dieGeo, mat);
   setDieValue(m, value, yawRot);
   return m;
 }
@@ -1419,7 +1546,7 @@ function clearDice(s) {
   while (s.diceG.children.length) {
     const m = s.diceG.children[0];
     s.diceG.remove(m);
-    if (Array.isArray(m.material)) m.material.forEach((x) => x.dispose());
+    dmat(m).forEach((x) => x.dispose());
   }
   s.dice = [];
 }
@@ -1511,6 +1638,7 @@ function animateReveal(s, delay) {
 // ---------------------------------------------------------------------------
 export function init(opts) {
   O = opts;
+  if (opts.quality) qualityPref = ['auto', 'low', 'medium', 'high'].includes(opts.quality) ? opts.quality : 'auto';
   container = opts.container;
   canvas = document.createElement('canvas');
   canvas.className = 'scene3d-canvas';
@@ -1561,35 +1689,7 @@ export function init(opts) {
   buildAtmosphere();
   batchStatic(scene);
   // Leichtes Leuchten (Fackeln, Laterne, Sonne) - nur auf stärkeren Geräten
-  if (!lowEnd) {
-    try {
-      // Mehrfach-Abtastung (MSAA) im Zwischenpuffer, sonst gehen mit Nachbearbeitung die glatten Kanten verloren
-      const rt = new THREE.WebGLRenderTarget(256, 256, { type: THREE.HalfFloatType, samples: renderer.capabilities.isWebGL2 ? 4 : 0 });
-      composer = new EffectComposer(renderer, rt);
-      composer.addPass(new RenderPass(scene, camera));
-      // Umgebungsverdeckung: weiche Kontaktschatten unter Bechern, Enten, Kisten
-      try {
-        aoPass = new GTAOPass(scene, camera, 256, 256);
-        aoPass.updateGtaoMaterial({ radius: 0.32, distanceExponent: 1.4, thickness: 1.2, scale: 1.1, samples: 12, distanceFallOff: 1 });
-        aoPass.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 12 });
-        aoPass.blendIntensity = 0.85;
-        // Sprites (Namensschilder, Leuchten), Transparentes und den Himmel nicht in die Verdeckung einrechnen
-        aoPass._overrideVisibility = function () {
-          const cache = this._visibilityCache;
-          this.scene.traverse((o) => {
-            if (!o.visible) return;
-            if (o.isSprite || o.isPoints || o.isLine || o === sky || (o.material && !Array.isArray(o.material) && (o.material.transparent || o.material.alphaTest > 0))) { o.visible = false; cache.push(o); }
-          });
-        };
-        composer.addPass(aoPass);
-      } catch (e) { aoPass = null; }
-      bloomPass = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.32, 0.55, 0.86);
-      composer.addPass(bloomPass);
-      composer.addPass(new OutputPass());
-      gradePass = new ShaderPass(GradeShader);
-      composer.addPass(gradePass);
-    } catch (e) { composer = null; }
-  }
+  applyQuality();
   centerSprite = makeSprite(512, 160, 0.62);
   centerSprite.position.set(0, TABLE_Y + 0.5, 0);
   centerSprite.visible = false;
@@ -1769,7 +1869,7 @@ function highlight(r, on) {
       const match = v === r.bid.face || (r.wildOnes && v === 1 && r.bid.face !== 1);
       m.userData.match = on && match;
       m.userData.dim = on && !match;
-      m.material.forEach((mat) => { mat.emissiveIntensity = 0; mat.color.setScalar(on && !match ? 0.45 : 1); });
+      dmat(m).forEach((mat) => { mat.emissiveIntensity = 0; mat.color.setScalar(on && !match ? 0.45 : 1); });
     });
   });
 }
@@ -1943,7 +2043,7 @@ export function events(list) {
           seatOrder.forEach((s) => s.dice.forEach((m) => {
             const ok = isMatch(m.userData.value, ev.bid.face, wild);
             m.userData.dim = !ok;
-            m.material.forEach((mat) => { mat.color.setScalar(ok ? 1 : 0.4); mat.emissiveIntensity = 0; });
+            dmat(m).forEach((mat) => { mat.color.setScalar(ok ? 1 : 0.4); mat.emissiveIntensity = 0; });
             if (ok) list.push(m);
           }));
           if (!list.length) { paintCount({ num: 0, face: ev.bid.face }); if (O && O.sound) O.sound('count', 0.6, 0); }
@@ -1972,7 +2072,7 @@ export function events(list) {
             addTween(1500, 0, (p) => {
               m.position.set(from.x + p * 0.5, from.y + Math.sin(Math.PI * p * 0.8) * 1.3 + p * 0.3, from.z + p * 3.2);
               m.rotation.x = p * spin; m.rotation.z = p * spin * 0.7;
-              m.material.forEach((mm) => { mm.color.setRGB(1, 1 - p * 0.6, 1 - p * 0.6); mm.transparent = true; mm.opacity = p < 0.75 ? 1 : 1 - (p - 0.75) / 0.25; });
+              dmat(m).forEach((mm) => { mm.color.setRGB(1, 1 - p * 0.6, 1 - p * 0.6); mm.transparent = true; mm.opacity = p < 0.75 ? 1 : 1 - (p - 0.75) / 0.25; });
             }, () => { m.visible = false; });
           }
           pop('−1 🎲', s, '#ff8a7a');
@@ -2097,10 +2197,8 @@ function tick() {
   if (sky) sky.material.uniforms.time.value = t;
   // Wind: gleichmäßiges Wiegen plus langsame Böen, jedes Blatt mit eigenem Takt und leichtem Flattern
   const gust = 0.55 + 0.45 * Math.sin(t * 0.21) * Math.sin(t * 0.13 + 1.3);
-  fronds.forEach((f) => {
-    f.obj.rotation.z = f.base + Math.sin(t * 1.3 + f.ph) * 0.05 * (0.7 + gust) + gust * 0.03;
-    f.obj.rotation.x = Math.sin(t * 0.9 + f.ph) * 0.03 * (0.7 + gust) + Math.sin(t * 6.5 + f.ph * 3) * 0.006 * gust;
-  });
+  S.windUniforms.time.value = t; S.windUniforms.gust.value = gust;
+
   torches.forEach((tc) => { const k = 1 + Math.sin(t * 17 + tc.ph) * 0.08 + Math.sin(t * 29 + tc.ph) * 0.06; tc.flame.scale.set(1, k, 1); tc.inner.scale.set(1, k * 0.95, 1); tc.glow.material.opacity = (0.55 + Math.sin(t * 13 + tc.ph) * 0.12) * (1 + nightCur * 0.7); tc.glow.scale.setScalar((tc.baseScale || (tc.baseScale = tc.glow.scale.x)) * (1 + nightCur * 0.9)); });
   if (lanternLight) lanternLight.intensity = (2.0 + Math.sin(t * 11) * 0.15 + Math.sin(t * 23) * 0.1) * (1 + nightCur * 1.8);
   nightLights.forEach((l, k) => { l.intensity = 3.2 * smooth01(0.35, 0.9, nightCur) * (1 + Math.sin(t * 15 + k * 2) * 0.12); });
@@ -2169,7 +2267,7 @@ function tick() {
     else if (!sd && s.xray) { body.material.dispose(); body.material = s.xray; s.xray = null; }
     if (sd && !s.anim && P.flip < 0.01 && s.diceRound !== 'sp' + v.roundNo) { placeDice(s, sd, 'sp' + v.roundNo); s.diceRound = 'sp' + v.roundNo; }
     // Würfel beim Aufdecken leuchten lassen
-    s.dice.forEach((m) => { if (m.userData.match) m.material.forEach((mat) => { mat.emissiveIntensity = 0.35 + Math.sin(t * 5) * 0.2; }); });
+    s.dice.forEach((m) => { if (m.userData.match) dmat(m).forEach((mat) => { mat.emissiveIntensity = 0.35 + Math.sin(t * 5) * 0.2; }); });
     // Sprechblasen
     if (s.bubble.visible && now > s.bubbleUntil) s.bubble.visible = false;
     // Figur
@@ -2330,27 +2428,21 @@ function tick() {
       _m.lookAt(_v1, _v2, _up); _q2.setFromRotationMatrix(_m);
       eye.lerp(_v1, k); _q1.slerp(_q2, k);
     } else if (winFocus && v.phase !== 'gameover') winFocus = null;
-    // Zuschauer-Kamera: über die Schulter der gewählten Ente, weich überblendet
-    const spS = spectId && seats[spectId] && !seats[spectId].isMe ? seats[spectId] : null;
-    if (spS && !introStart && !(winFocus && !winFocus.released && v.phase === 'gameover')) {
-      _v1.set(0.32, 1.62, 0.82); spS.frame.localToWorld(_v1);
-      _v2.set(0, TABLE_Y + 0.05, -(seatR - tableR) - 0.55); spS.frame.localToWorld(_v2);
-      _m.lookAt(_v1, _v2, _up); _q2.setFromRotationMatrix(_m);
-      _e.setFromQuaternion(_q2, 'YXZ'); _e.y += yaw; _e.x += (pitch - basePitch) * 0.8; _q2.setFromEuler(_e);
-      eye.copy(_v1); _q1.copy(_q2);
-    }
-    if (camSmooth) {
-      const k = Math.min(1, dt * 3.5);
-      camera.position.lerp(eye, k); camera.quaternion.slerp(_q1, k);
-      if (camera.position.distanceTo(eye) < 0.01) camSmooth = !!spS;
-      _q1.copy(camera.quaternion); eye.copy(camera.position);
-    }
+    spectCam(eye, dt, v);
     camera.position.copy(eye);
     if (shakeT > 0) { shakeT = Math.max(0, shakeT - dt); camera.position.y += Math.sin(t * 90) * shakeT * 0.02; }
     camera.quaternion.copy(_q1);
     if (debugCam) { camera.position.set(...debugCam.pos); camera.lookAt(...debugCam.look); }
     // Blickrichtung ab und zu an den Server (die anderen sehen, wohin man schaut)
     if (O && O.onLook && now - lookSent > 400 && Math.abs(yaw - lookLast) > 0.06) { lookSent = now; lookLast = yaw; O.onLook(yaw); }
+  } else if (v) {
+    // Zuschauer ohne eigenen Platz (während der Partie dazugekommen): langsamer Rundblick
+    const a = t * 0.05;
+    const eye = _tmp.set(Math.sin(a) * (seatR + 0.95), 1.95, Math.cos(a) * (seatR + 0.95));
+    _m.lookAt(eye, _v3.set(0, TABLE_Y, 0), _up); _q1.setFromRotationMatrix(_m);
+    spectCam(eye, dt, v);
+    camera.position.copy(eye); camera.quaternion.copy(_q1);
+    if (debugCam) { camera.position.set(...debugCam.pos); camera.lookAt(...debugCam.look); }
   } else {
     camera.position.set(0, 3.2, 4.2);
     camera.lookAt(0, TABLE_Y, 0);
@@ -2367,7 +2459,7 @@ function tick() {
   if (gradePass) gradePass.uniforms.night.value = nightCur;
   // Zu langsam? Dann die teure Umgebungsverdeckung abschalten (einmalig, nach ein paar Sekunden Messung)
   // Zu langsam? Stufenweise sparen: erst die Umgebungsverdeckung, dann die ganze Nachbearbeitung abschalten
-  if (composer) {
+  if (qualityPref === 'auto' && (composer || qFlags.shadows)) {
     if (!perfSamples.length) perfSamples.t0 = now;
     perfSamples.push(rawDt);
     const wall = now - perfSamples.t0;
@@ -2376,8 +2468,10 @@ function tick() {
       const med = sorted[Math.floor(sorted.length / 2)];
       perfSamples = [];
       if (med > 1 / 38) {
-        if (aoPass && aoPass.enabled) aoPass.enabled = false;
-        else composer = null;
+        // stufenweise: Umgebungsverdeckung -> Nachbearbeitung -> Schatten, Partikel und Auflösung
+        if (aoPass && aoPass.enabled) { aoPass.enabled = false; qualityLevel = 'medium'; }
+        else if (composer) { disposeComposer(); qualityLevel = 'medium'; }
+        else applyQuality(QUALITY.low);
       }
     }
   }
@@ -2511,4 +2605,12 @@ export function debugPerf(o) {
   if (o && o.noAo && aoPass) aoPass.enabled = false;
   if (o && o.hide) scene.traverse((x) => { if (x.userData && x.userData.tag === o.hide) x.visible = false; });
   return { composer: !!composer, ao: !!(aoPass && aoPass.enabled), calls: renderer.info.render.calls };
+}
+export function debugGroups() {
+  const out = [];
+  scene.children.forEach((c, i) => {
+    let n = 0; const mats = new Set(); c.traverse((o) => { if (o.isMesh && o.visible) { n++; mats.add(o.material.type + ':' + (o.material.color ? o.material.color.getHexString() : '')); } });
+    if (n > 3) out.push([i, c.type + (c.userData.dynamic ? '*' : ''), n, [...mats].slice(0, 4).join(' ')]);
+  });
+  return out.sort((a, b) => b[2] - a[2]).slice(0, 15);
 }

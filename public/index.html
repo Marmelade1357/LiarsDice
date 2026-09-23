@@ -137,15 +137,29 @@
     <!-- Oben rechts: Navigation -->
     <nav class="hud-nav" aria-label="Spielmenü">
       <button id="btn-toggle-sound" class="icon-btn" type="button" data-tip="Lautstärke" aria-label="Lautstärke">🔊</button>
+      <button id="btn-settings" class="icon-btn" type="button" data-tip="Grafik" aria-label="Grafik-Einstellungen">⚙️</button>
       <button id="btn-toggle-players" class="icon-btn" type="button" data-tip="Crew" aria-label="Crew">👥</button>
       <button id="btn-show-log" class="icon-btn" type="button" data-tip="Verlauf" aria-label="Verlauf">📜</button>
       <button id="btn-show-rules" class="icon-btn" type="button" data-tip="Regeln" aria-label="Regeln">📖</button>
       <button id="btn-leave-game" class="icon-btn icon-leave" type="button" data-tip="Spiel verlassen" aria-label="Spiel verlassen">✕</button>
       <!-- Lautstärke -->
       <div id="volume-pop" class="hud-panel volume-pop hidden" role="dialog" aria-label="Lautstärke">
-        <div class="vol-head"><span class="hud-label">Lautstärke</span><span id="volume-value" class="vol-value"></span></div>
-        <input id="volume-range" class="vol-range" type="range" min="0" max="100" step="1" aria-label="Lautstärke" />
+        <div class="vol-head"><span class="hud-label">Effekte</span><span id="volume-value" class="vol-value"></span></div>
+        <input id="volume-range" class="vol-range" type="range" min="0" max="100" step="1" aria-label="Lautstärke der Effekte" />
+        <div class="vol-head"><span class="hud-label">Musik</span><span id="music-value" class="vol-value"></span></div>
+        <input id="music-range" class="vol-range" type="range" min="0" max="100" step="1" aria-label="Lautstärke der Musik" />
         <button id="volume-mute" class="hud-btn small secondary" type="button"></button>
+      </div>
+      <!-- Grafik-Qualität -->
+      <div id="settings-pop" class="hud-panel volume-pop settings-pop hidden" role="dialog" aria-label="Grafik">
+        <div class="vol-head"><span class="hud-label">Grafik</span><span id="quality-now" class="vol-value"></span></div>
+        <div id="quality-seg" class="q-seg">
+          <button type="button" data-q="auto">Auto</button>
+          <button type="button" data-q="low">Niedrig</button>
+          <button type="button" data-q="medium">Mittel</button>
+          <button type="button" data-q="high">Hoch</button>
+        </div>
+        <p id="quality-hint" class="q-hint"></p>
       </div>
     </nav>
 
@@ -195,11 +209,11 @@
               <button id="qty-plus" class="step-btn" type="button" aria-label="Mehr">+</button>
             </div>
           </div>
-          <button id="btn-bid" class="hud-btn primary bid-go" type="button">Bieten</button>
+          <button id="btn-bid" class="hud-btn primary bid-go" type="button" data-tip="Enter">Bieten</button>
         </div>
         <div id="call-controls" class="call-controls hidden">
-          <button id="btn-liar" class="liar-btn" type="button">Lügner!</button>
-          <button id="btn-spot" class="hud-btn spot hidden" type="button">Genau!</button>
+          <button id="btn-liar" class="liar-btn" type="button" data-tip="Taste L">Lügner!</button>
+          <button id="btn-spot" class="hud-btn spot hidden" type="button" data-tip="Taste G">Genau!</button>
         </div>
       </div>
     </div>
@@ -242,7 +256,9 @@
       <h3>Nächste Runde</h3>
       <p>Wer den Würfel verloren hat, beginnt die nächste Runde. Mit jeder Runde liegen weniger Würfel auf dem Tisch – und das Bluffen wird schwerer.</p>
       <h3>Steuerung</h3>
-      <p>Mit gedrückter Maus bzw. mit dem Finger ziehen, um dich am Tisch umzusehen. Doppelklick oder „🎯 Blick“ setzt die Ansicht zurück. Jeder Zug hat ein Zeitlimit (in der Lobby einstellbar, Standard 30 Sekunden) – läuft es ab, entscheidet ein Bot für dich. Ohne Zeitlimit kann der Host nach einer Weile „Überspringen“ wählen.</p>
+      <p>Mit gedrückter Maus bzw. mit dem Finger ziehen, um dich am Tisch umzusehen. Doppelklick oder „🧭“ setzt die Ansicht zurück. Jeder Zug hat ein Zeitlimit (in der Lobby einstellbar, Standard 30 Sekunden) – läuft es ab, entscheidet ein Bot für dich. Ohne Zeitlimit kann der Host nach einer Weile „Überspringen“ wählen.</p>
+      <h3>Tastenkürzel (PC)</h3>
+      <p class="keys"><kbd>1</kbd>–<kbd>6</kbd> Augenzahl · <kbd>↑</kbd>/<kbd>↓</kbd> Anzahl · <kbd>Enter</kbd> bieten · <kbd>L</kbd> „Lügner!“ · <kbd>G</kbd> „Genau!“ · <kbd>Leertaste</kbd> halten: unter den Becher schauen · <kbd>M</kbd> stumm · <kbd>C</kbd> Crew · <kbd>Q</kbd>/<kbd>E</kbd> beim Zuschauen Ente wechseln · <kbd>Esc</kbd> schließen</p>
     </div>
   </div>
 </div>

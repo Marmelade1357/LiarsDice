@@ -18,7 +18,11 @@ Das Würfel-Bluffspiel aus **Fluch der Karibik – Die Truhe des Todes** zum Spi
 - **Bildqualität**: Kantenglättung auch mit Nachbearbeitung, weiche Umgebungsverdeckung (schaltet sich auf langsamen Geräten automatisch ab), Farbfilter mit Vignette, Kontaktschatten, Palmwedel mit Blatt-Textur und Windböen, Lederbecher mit Nähten und eingebranntem Totenkopf.
 - **Atmosphäre**: Funken am Lagerfeuer, Glühwürmchen und Nebelbänder in der Nacht, Gischt an den Felsen, Entenspuren vom Ruderboot zum Tisch. Namensschilder haben unabhängig von der Entfernung dieselbe Größe.
 - **Zuschauen nach dem Ausscheiden**: Wer keine Würfel mehr hat, sieht die Würfel aller anderen (durchsichtige Becher, Würfel in der Crew-Liste) und kann mit ‹ › hinter die Schulter jeder noch lebenden Ente wechseln. Der Server schickt fremde Würfel nur an Ausgeschiedene.
-- **Lautstärkeregler**: Klick auf das Ton-Symbol öffnet Regler und Stumm-Schalter; die Einstellung wird im Browser gemerkt.
+- **Ton**: Klick auf das Ton-Symbol öffnet Regler für Effekte und Musik sowie einen Stumm-Schalter (im Browser gemerkt). Die Hintergrundmusik ist ein eigenes, ruhiges Seemanns-Motiv im 6/8-Takt, das synthetisiert wird und gegen Ende der Partie etwas anzieht.
+- **Grafik-Qualität** (⚙️): Auto, Niedrig, Mittel, Hoch. „Auto“ richtet sich nach dem Gerät und schaltet bei Ruckeln stufenweise Effekte ab. Palmwedel, Schiffe und Deko sind zu wenigen Zeichenaufrufen zusammengefasst, Würfel nutzen eine gemeinsame Textur.
+- **Später dazukommen**: Wer einer laufenden Partie beitritt, schaut zu (inklusive aller Würfel) und sitzt ab der nächsten Partie automatisch mit am Tisch.
+- **Tastenkürzel am PC**: 1–6 Augenzahl, ↑/↓ Anzahl, Enter bieten, L „Lügner!“, G „Genau!“, Leertaste unter den Becher schauen, M stumm, C Crew, Q/E beim Zuschauen Ente wechseln, Esc schließen.
+- **Nach dem Aufdecken** steht im Ergebnis, wer die nächste Runde beginnt.
 - **Kamera**: etwas höher und weiter hinten, breiteres Sichtfeld (die Nachbarn sind mit im Bild) und sie dreht sich sanft zur Ente, die gerade bietet – außer man schaut sich selbst um. Auf dem Handy im Hochformat steiler von oben.
 - **Tageszeit**: Mit jedem verlorenen Würfel geht die Sonne weiter unter; in der Schlussrunde ist Nacht mit Sternen, Mond und hell leuchtenden Fackeln.
 - **Unter den Becher schauen**: Knopf, Leertaste oder Klick auf den eigenen Becher – du hebst den Becher nur leicht an, so dass *du* die Würfel siehst. Alle anderen sehen live, dass du nachschaust (der Becher kippt an deinem Platz an, die Figur senkt den Kopf).

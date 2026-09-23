@@ -101,6 +101,7 @@ function createRoom() {
     code,
     hostId: null,
     players: [], // { id, token, name, socketId, connected, isBot, peeking, look }
+    watchers: [], // später Dazugekommene: schauen zu und spielen ab der nächsten Partie mit
     phase: 'lobby', // lobby | playing | gameover
     settings: Object.assign({}, DEFAULT_SETTINGS),
     game: null,
@@ -234,6 +235,7 @@ function publicState(room) {
     maxPlayers: MAX_PLAYERS,
     settings: room.settings,
     players: room.players.map((p) => publicPlayer(room, p)),
+    watchers: room.watchers.map((w) => ({ id: w.id, name: w.name, connected: w.connected, avatar: w.avatar })),
     roundNo: g ? g.roundNo : 0,
     turnNo: g ? g.turnNo : 0,
     currentTurnId: bidding ? g.turn : null,
@@ -263,8 +265,8 @@ function sendDiceTo(room, player) {
   if (!player.socketId) return;
   const g = room.game;
   const data = { round: g ? g.roundNo : 0, dice: g && g.dice[player.id] ? g.dice[player.id] : [] };
-  // Ausgeschiedene schauen zu und dürfen die Würfel aller anderen sehen
-  if (g && room.phase === 'playing' && g.out.includes(player.id)) {
+  // Ausgeschiedene und Zuschauer dürfen die Würfel aller anderen sehen
+  if (g && room.phase === 'playing' && (g.out.includes(player.id) || player.watcher)) {
     data.others = {};
     room.players.forEach((q) => { if (q.id !== player.id && g.dice[q.id] && g.dice[q.id].length) data.others[q.id] = g.dice[q.id]; });
   }
@@ -300,6 +302,7 @@ function broadcastState(room) {
   updateTurnTimer(room);
   io.to(room.code).emit('gameState', publicState(room));
   room.players.forEach((p) => sendDiceTo(room, p));
+  room.watchers.forEach((w) => sendDiceTo(room, w));
   scheduleBotTurnIfNeeded(room);
 }
 
@@ -484,7 +487,17 @@ function resetToLobby(room) {
   room.revealUntil = 0;
   // Wer das Spiel verlassen hat, fliegt beim Zurücksetzen aus der Lobby.
   room.players = room.players.filter((p) => p.isBot || p.connected);
+  // Zuschauer setzen sich jetzt an den Tisch (solange Plätze frei sind; Bots machen notfalls Platz)
+  room.watchers.filter((w) => w.connected).forEach((w) => {
+    if (room.players.length >= MAX_PLAYERS) { const bi = room.players.findIndex((p) => p.isBot); if (bi >= 0) room.players.splice(bi, 1); }
+    if (room.players.length >= MAX_PLAYERS) return;
+    delete w.watcher;
+    room.players.push(w);
+    log(room, `${w.name} setzt sich an den Tisch.`);
+  });
+  room.watchers = [];
   room.players.forEach((p) => { p.peeking = false; });
+  if (!room.hostId || !findPlayer(room, room.hostId)) ensureHost(room);
   log(room, 'Zurück zur Lobby. Bereit für eine neue Partie.');
 }
 
@@ -498,7 +511,7 @@ io.on('connection', (socket) => {
   const ctx = () => {
     const room = rooms.get(socket.data.roomCode);
     if (!room) return {};
-    return { room, player: findPlayer(room, socket.data.playerId) };
+    return { room, player: findPlayer(room, socket.data.playerId), watcher: room.watchers.find((w) => w.id === socket.data.playerId) };
   };
 
   socket.on('createRoom', ({ name, avatar } = {}, cb) => {
@@ -553,11 +566,35 @@ io.on('connection', (socket) => {
       }
     }
 
-    if (room.phase !== 'lobby') return cb({ ok: false, error: 'Das Spiel läuft bereits. Bitte warte auf die nächste Partie.' });
-    if (room.players.length >= MAX_PLAYERS) return cb({ ok: false, error: `Der Tisch ist bereits voll (max. ${MAX_PLAYERS} Spieler).` });
+    if (token) {
+      const w = room.watchers.find((x) => x.token === token);
+      if (w) {
+        w.socketId = socket.id; w.connected = true;
+        socket.join(room.code); socket.data.roomCode = room.code; socket.data.playerId = w.id;
+        touchRoom(room);
+        cb({ ok: true, code: room.code, playerId: w.id, token: w.token, rejoined: true, watching: true });
+        broadcastState(room);
+        return;
+      }
+    }
+    // Läuft schon eine Partie? Dann als Zuschauer dazu - ab der nächsten Partie wird mitgespielt
+    const late = room.phase !== 'lobby';
+    const humansWaiting = room.watchers.length;
+    if (late && room.players.filter((p) => !p.isBot).length + humansWaiting >= MAX_PLAYERS) return cb({ ok: false, error: `Der Tisch ist bereits voll (max. ${MAX_PLAYERS} Spieler).` });
+    if (!late && room.players.length >= MAX_PLAYERS) return cb({ ok: false, error: `Der Tisch ist bereits voll (max. ${MAX_PLAYERS} Spieler).` });
     name = cleanName(name);
-    if (room.players.some((p) => p.name.toLowerCase() === name.toLowerCase())) {
+    if (room.players.concat(room.watchers).some((p) => p.name.toLowerCase() === name.toLowerCase())) {
       return cb({ ok: false, error: 'Dieser Name ist am Tisch bereits vergeben.' });
+    }
+    if (late) {
+      const w = { id: makeId(), token: makeId(), name, socketId: socket.id, connected: true, watcher: true, avatar: AV.cleanAvatar(avatar) || AV.randomAvatar() };
+      room.watchers.push(w);
+      socket.join(room.code); socket.data.roomCode = room.code; socket.data.playerId = w.id;
+      touchRoom(room);
+      log(room, `${name} schaut zu und spielt ab der nächsten Partie mit.`);
+      cb({ ok: true, code: room.code, playerId: w.id, token: w.token, watching: true });
+      broadcastState(room);
+      return;
     }
     const player = { id: makeId(), token: makeId(), name, socketId: socket.id, connected: true, avatar: AV.cleanAvatar(avatar) || AV.randomAvatar() };
     room.players.push(player);
@@ -572,7 +609,14 @@ io.on('connection', (socket) => {
   });
 
   socket.on('leaveRoom', () => {
-    const { room, player } = ctx();
+    const { room, player, watcher } = ctx();
+    if (room && watcher) {
+      room.watchers = room.watchers.filter((w) => w !== watcher);
+      log(room, `${watcher.name} schaut nicht mehr zu.`);
+      socket.leave(room.code); socket.data.roomCode = null; socket.data.playerId = null;
+      broadcastState(room);
+      return;
+    }
     if (!room || !player) return;
     if (room.phase === 'lobby') {
       room.players = room.players.filter((p) => p.id !== player.id);
@@ -732,7 +776,8 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', () => {
-    const { room, player } = ctx();
+    const { room, player, watcher } = ctx();
+    if (room && watcher && watcher.socketId === socket.id) { watcher.connected = false; broadcastState(room); return; }
     if (!room || !player) return;
     if (player.socketId !== socket.id) return; // verspätetes Event eines alten Sockets nach Reconnect
     player.connected = false;

@@ -24,6 +24,10 @@
   let soundOn = safeGet(SOUND_KEY) !== 'off';
   const VOLUME_KEY = 'liars_volume';
   let volume = (() => { const v = Number(safeGet(VOLUME_KEY)); return Number.isFinite(v) && safeGet(VOLUME_KEY) !== null ? Math.max(0, Math.min(1, v)) : 0.8; })();
+  const MUSIC_KEY = 'liars_music';
+  const QUALITY_KEY = 'liars_quality';
+  let quality = ['auto', 'low', 'medium', 'high'].includes(safeGet(QUALITY_KEY)) ? safeGet(QUALITY_KEY) : 'auto';
+  let musicVol = (() => { const v = Number(safeGet(MUSIC_KEY)); return Number.isFinite(v) && safeGet(MUSIC_KEY) !== null ? Math.max(0, Math.min(1, v)) : 0.35; })();
   let peeking = false;
   let peekMap = {};           // playerId -> true (schaut gerade nach)
   let sel = { face: null, qty: 1, key: null, sending: false };
@@ -35,10 +39,17 @@
   // ---------------------------------------------------------------------
   // Sound (synthetisiert, keine Dateien)
   // ---------------------------------------------------------------------
-  let audioCtx = null; let noiseBuf = null; let waves = null; let masterGain = null;
-  // Gesamtlautstärke: quadratisch, damit der Regler sich gleichmäßig anfühlt
-  function applyVolume() { if (masterGain) masterGain.gain.setTargetAtTime(soundOn ? volume * volume * 1.25 : 0, audioCtx.currentTime, 0.03); }
-  function out() { ctx(); return masterGain; }
+  let audioCtx = null; let noiseBuf = null; let waves = null; let masterGain = null; let sfxGain = null; let musicGain = null;
+  // Lautstärken: quadratisch, damit sich die Regler gleichmäßig anfühlen. Stumm schaltet alles ab.
+  function applyVolume() {
+    if (!masterGain) return;
+    const now = audioCtx.currentTime;
+    masterGain.gain.setTargetAtTime(soundOn ? 1 : 0, now, 0.03);
+    sfxGain.gain.setTargetAtTime(volume * volume * 1.25, now, 0.03);
+    musicGain.gain.setTargetAtTime(musicVol * musicVol * 0.9, now, 0.05);
+    updateMusic();
+  }
+  function out() { ctx(); return sfxGain; }
   function ctx() {
     if (!audioCtx) {
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -46,7 +57,9 @@
       const d = noiseBuf.getChannelData(0);
       for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
       masterGain = audioCtx.createGain(); masterGain.connect(audioCtx.destination);
-      masterGain.gain.value = soundOn ? volume * volume * 1.25 : 0;
+      masterGain.gain.value = soundOn ? 1 : 0;
+      sfxGain = audioCtx.createGain(); sfxGain.gain.value = volume * volume * 1.25; sfxGain.connect(masterGain);
+      musicGain = audioCtx.createGain(); musicGain.gain.value = musicVol * musicVol * 0.9; musicGain.connect(masterGain);
     }
     return audioCtx;
   }
@@ -131,6 +144,71 @@
       waves = { src, lfo, g };
     } catch (e) { /* egal */ }
   }
+  // ----- Hintergrundmusik: eigenes, ruhiges Seemanns-Motiv im 6/8-Takt (d-Moll), synthetisiert -----
+  const MEL = [
+    [69, -1, 74, -1, 72, 69], [65, -1, 67, 69, -1, -1], [67, -1, 72, -1, 70, 67], [64, -1, 65, 67, -1, -1],
+    [65, -1, 70, -1, 69, 65], [62, -1, 67, -1, 65, 64], [64, -1, 69, -1, 73, -1], [69, -1, -1, 64, -1, -1],
+    [74, -1, -1, 69, -1, 65], [69, -1, 67, 65, 64, 62], [72, -1, -1, 67, -1, 64], [67, -1, 65, 64, 62, 60],
+    [62, -1, 65, -1, 70, -1], [69, -1, 67, -1, 74, -1], [73, -1, 69, -1, 64, -1], [62, -1, -1, -1, -1, -1],
+  ];
+  // Akkorde je Takt (Grundton für den Bass, Töne für die Akkordeon-Fläche)
+  const CH = [
+    [38, [62, 65, 69]], [38, [62, 65, 69]], [36, [60, 64, 67]], [36, [60, 64, 67]], [34, [58, 62, 65]], [43, [55, 58, 62]], [45, [57, 61, 64]], [45, [57, 61, 64]],
+    [38, [62, 65, 69]], [38, [62, 65, 69]], [36, [60, 64, 67]], [36, [60, 64, 67]], [34, [58, 62, 65]], [43, [55, 58, 62]], [45, [57, 61, 64]], [38, [62, 65, 69]],
+  ];
+  const music = { on: false, timer: null, next: 0, step: 0 };
+  const mhz = (m) => 440 * Math.pow(2, (m - 69) / 12);
+  function musicNote(c, midi, t0, dur, kind) {
+    const g = c.createGain(); g.connect(musicGain);
+    if (kind === 'lead') {
+      const o = c.createOscillator(); o.type = 'triangle'; o.frequency.value = mhz(midi);
+      const o2 = c.createOscillator(); o2.type = 'square'; o2.frequency.value = mhz(midi) * 1.003;
+      const f = c.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 2200;
+      const g2 = c.createGain(); g2.gain.value = 0.12;
+      o.connect(f); o2.connect(g2).connect(f); f.connect(g);
+      g.gain.setValueAtTime(0, t0); g.gain.linearRampToValueAtTime(0.16, t0 + 0.015); g.gain.exponentialRampToValueAtTime(0.05, t0 + dur * 0.6); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur + 0.25);
+      [o, o2].forEach((x) => { x.start(t0); x.stop(t0 + dur + 0.3); });
+    } else if (kind === 'bass') {
+      const o = c.createOscillator(); o.type = 'sine'; o.frequency.value = mhz(midi);
+      const o2 = c.createOscillator(); o2.type = 'triangle'; o2.frequency.value = mhz(midi) * 2;
+      const g2 = c.createGain(); g2.gain.value = 0.25; o.connect(g); o2.connect(g2).connect(g);
+      g.gain.setValueAtTime(0, t0); g.gain.linearRampToValueAtTime(0.28, t0 + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+      [o, o2].forEach((x) => { x.start(t0); x.stop(t0 + dur + 0.05); });
+    } else {
+      // Akkordeon-Fläche: zwei leicht verstimmte Sägezähne, weich gefiltert
+      const f = c.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 850; f.connect(g);
+      [0.997, 1.004].forEach((d) => { const o = c.createOscillator(); o.type = 'sawtooth'; o.frequency.value = mhz(midi) * d; o.connect(f); o.start(t0); o.stop(t0 + dur + 0.1); });
+      g.gain.setValueAtTime(0, t0); g.gain.linearRampToValueAtTime(0.022, t0 + 0.25); g.gain.setValueAtTime(0.022, t0 + dur - 0.2); g.gain.linearRampToValueAtTime(0, t0 + dur + 0.05);
+    }
+  }
+  function musicTick() {
+    if (!music.on || !audioCtx) return;
+    const c = audioCtx;
+    // etwas schneller, je weiter die Partie fortgeschritten ist (weniger Würfel am Tisch)
+    const s = latestState; let tension = 0;
+    if (s && s.phase === 'playing' && s.startDice) tension = Math.max(0, Math.min(1, 1 - s.totalDice / s.startDice));
+    const eighth = 60 / ((72 + tension * 14) * 3);
+    if (music.next < c.currentTime) music.next = c.currentTime + 0.05;
+    while (music.next < c.currentTime + 0.35) {
+      const bar = Math.floor(music.step / 6) % MEL.length, pos = music.step % 6, t0 = music.next;
+      const m = MEL[bar][pos];
+      if (m > 0) { let len = 1; while (pos + len < 6 && MEL[bar][pos + len] === -1 && len < 2) len++; musicNote(c, m, t0, eighth * len * 0.95, 'lead'); }
+      if (pos === 0 || pos === 3) musicNote(c, CH[bar][0], t0, eighth * 2.8, 'bass');
+      if (pos === 0) CH[bar][1].forEach((n) => musicNote(c, n - 12, t0, eighth * 6, 'pad'));
+      music.next += eighth; music.step++;
+    }
+  }
+  function updateMusic() {
+    const want = soundOn && musicVol > 0.001 && !document.hidden && musicAllowed;
+    if (want && !music.on) {
+      try { ctx(); if (audioCtx.state === 'suspended') audioCtx.resume(); } catch (e) { return; }
+      music.on = true; music.next = 0; music.timer = setInterval(musicTick, 100); musicTick();
+    } else if (!want && music.on) { music.on = false; clearInterval(music.timer); music.timer = null; }
+  }
+  let musicAllowed = false; // erst nach der ersten Nutzer-Interaktion (Autoplay-Regeln der Browser)
+  document.addEventListener('visibilitychange', () => updateMusic());
+  document.addEventListener('pointerdown', () => { if (!musicAllowed) { musicAllowed = true; updateMusic(); } }, { passive: true });
+  document.addEventListener('keydown', () => { if (!musicAllowed) { musicAllowed = true; updateMusic(); } });
   function stopWaves() { if (waves) { try { waves.src.stop(); waves.lfo.stop(); } catch (e) { /* egal */ } waves = null; } }
   function vibrate(p) { if (navigator.vibrate) { try { navigator.vibrate(p); } catch (e) { /* egal */ } } }
 
@@ -342,12 +420,16 @@
   // Ton: Klick öffnet den Lautstärkeregler (mit Stumm-Schalter)
   const soundBtn = $('btn-toggle-sound');
   const volPop = $('volume-pop'); const volRange = $('volume-range'); const volMute = $('volume-mute'); const volVal = $('volume-value');
+  const musRange = $('music-range'); const musVal = $('music-value');
   function soundIcon() { return !soundOn || volume === 0 ? '🔇' : volume < 0.45 ? '🔉' : '🔊'; }
   function renderVolume() {
     soundBtn.textContent = soundIcon();
     volRange.value = String(Math.round(volume * 100));
     volRange.style.setProperty('--fill', `${Math.round(volume * 100)}%`);
     volVal.textContent = soundOn ? `${Math.round(volume * 100)} %` : 'stumm';
+    musRange.value = String(Math.round(musicVol * 100));
+    musRange.style.setProperty('--fill', `${Math.round(musicVol * 100)}%`);
+    musVal.textContent = !soundOn ? 'stumm' : musicVol > 0 ? `${Math.round(musicVol * 100)} %` : 'aus';
     volMute.textContent = soundOn ? '🔇 Stumm' : '🔊 Ton an';
     volMute.classList.toggle('on', !soundOn);
     volPop.classList.toggle('muted', !soundOn);
@@ -355,7 +437,7 @@
   function setSoundOn(on) {
     soundOn = on; safeSet(SOUND_KEY, soundOn ? 'on' : 'off');
     if (soundOn) { try { ctx().resume(); } catch (e) { /* egal */ } startWaves(); } else stopWaves();
-    applyVolume(); renderVolume();
+    applyVolume(); updateMusic(); renderVolume();
   }
   soundBtn.addEventListener('click', (e) => { e.stopPropagation(); volPop.classList.toggle('hidden'); soundBtn.classList.toggle('on', !volPop.classList.contains('hidden')); });
   volRange.addEventListener('input', () => {
@@ -364,9 +446,41 @@
     applyVolume(); renderVolume();
   });
   volRange.addEventListener('change', () => sound('bid', 1));
+  musRange.addEventListener('input', () => {
+    musicVol = Math.max(0, Math.min(1, Number(musRange.value) / 100)); safeSet(MUSIC_KEY, String(musicVol));
+    musicAllowed = true;
+    if (!soundOn && musicVol > 0) { setSoundOn(true); return; }
+    applyVolume(); renderVolume();
+  });
   volMute.addEventListener('click', () => setSoundOn(!soundOn));
   document.addEventListener('pointerdown', (e) => { if (!volPop.classList.contains('hidden') && !volPop.contains(e.target) && e.target !== soundBtn) { volPop.classList.add('hidden'); soundBtn.classList.remove('on'); } });
   renderVolume();
+  // Grafik-Qualität
+  const setPop = $('settings-pop'); const setBtn = $('btn-settings');
+  const QLABEL = { low: 'Niedrig', medium: 'Mittel', high: 'Hoch' };
+  const QHINT = {
+    auto: 'Passt sich dem Gerät an und schaltet bei Ruckeln automatisch Effekte ab.',
+    low: 'Ohne Schatten und Effekte – für ältere Handys und schwache Laptops.',
+    medium: 'Schatten, Leuchten und Farbfilter, ohne die aufwendige Umgebungsverdeckung.',
+    high: 'Alle Effekte inklusive weicher Umgebungsverdeckung.',
+  };
+  function renderQuality() {
+    setPop.querySelectorAll('[data-q]').forEach((b) => b.classList.toggle('sel', b.dataset.q === quality));
+    const cur = b3 && b3.getQuality ? b3.getQuality().level : null;
+    $('quality-now').textContent = quality === 'auto' && cur ? `jetzt: ${QLABEL[cur] || cur}` : '';
+    $('quality-hint').textContent = QHINT[quality];
+  }
+  setPop.querySelectorAll('[data-q]').forEach((b) => b.addEventListener('click', () => {
+    quality = b.dataset.q; safeSet(QUALITY_KEY, quality);
+    if (b3 && b3.setQuality) b3.setQuality(quality);
+    renderQuality();
+  }));
+  setBtn.addEventListener('click', (e) => {
+    e.stopPropagation(); volPop.classList.add('hidden'); soundBtn.classList.remove('on');
+    setPop.classList.toggle('hidden'); setBtn.classList.toggle('on', !setPop.classList.contains('hidden')); renderQuality();
+  });
+  document.addEventListener('pointerdown', (e) => { if (!setPop.classList.contains('hidden') && !setPop.contains(e.target) && e.target !== setBtn) { setPop.classList.add('hidden'); setBtn.classList.remove('on'); } });
+  soundBtn.addEventListener('click', () => { setPop.classList.add('hidden'); setBtn.classList.remove('on'); });
   // Crew-Übersicht: auf kleinen Bildschirmen standardmäßig eingeklappt
   let crewOpen = safeGet(CREW_KEY) ? safeGet(CREW_KEY) === 'open' : window.innerWidth > 720;
   function applyCrew() { $('crew-panel').classList.toggle('collapsed', !crewOpen); }
@@ -551,6 +665,7 @@
   function frozenDice(p) { return crewFreeze && Date.now() < crewFreeze.until && crewFreeze.counts[p.id] !== undefined ? crewFreeze.counts[p.id] : p.dice; }
   function renderCrew(state) {
     const list = $('crew-list'); list.innerHTML = '';
+    const watchersRow = () => (state.watchers || []).forEach((w) => list.appendChild(el('li', { class: 'crew-row watcher' + (w.id === myId() ? ' me' : ''), title: 'schaut zu, spielt ab der nächsten Partie mit' }, [el('span', { class: 'dot', style: `background:${hex(PAL.body[(w.avatar && w.avatar.body) || 0][1])}` }), el('span', { class: 'nm', text: '👁 ' + w.name }), el('span', { class: 'pips', text: 'schaut zu' })])));
     const max = state.settings.dice;
     state.players.forEach((p) => {
       const cls = ['crew-row'];
@@ -571,6 +686,7 @@
       else kids.push(pips);
       list.appendChild(el('li', { class: cls.join(' ') }, kids));
     });
+    watchersRow();
   }
 
   // ----- Zuschauen (ausgeschieden): fremde Würfel sehen, Blick hinter andere Enten -----
@@ -580,15 +696,17 @@
     const o = myDice && myDice.others && myDice.round === state.roundNo ? myDice.others : null;
     return o && o[id] ? o[id] : null;
   }
+  function isWatching(state) { return !!(state && state.watchers && state.watchers.some((w) => w.id === myId())); }
   function spectCandidates(state) { return [null].concat(state.players.filter((p) => p.id !== myId() && !p.eliminated).map((p) => p.id)); }
   function renderSpect(state) {
     const bar = $('spect-bar');
     const me = state.players.find((p) => p.id === myId());
-    const active = state.phase === 'playing' && me && me.eliminated;
+    const watching = isWatching(state);
+    const active = state.phase === 'playing' && ((me && me.eliminated) || watching);
     if (!active) { hide(bar); if (spectTarget) { spectTarget = null; if (b3 && b3.setSpectate) b3.setSpectate(null); } return; }
     const cands = spectCandidates(state);
     if (!cands.includes(spectTarget)) { spectTarget = null; if (b3 && b3.setSpectate) b3.setSpectate(null); }
-    $('spect-name').textContent = spectTarget ? pname(state, spectTarget) : 'Eigener Platz';
+    $('spect-name').textContent = spectTarget ? pname(state, spectTarget) : (watching ? 'Überblick' : 'Eigener Platz');
     const box = $('spect-dice'); box.innerHTML = '';
     const d = spectTarget ? spectDiceFor(state, spectTarget) : null;
     if (d) d.slice().sort((a, b) => a - b).forEach((v) => box.appendChild(dieEl(v)));
@@ -624,6 +742,32 @@
     if (latestState) renderCrew(latestState);
   }
   $('btn-peek').addEventListener('click', () => setPeeking(!peeking));
+  // ----- Tastenkürzel (PC): 1–6 Augenzahl, ↑/↓ bzw. +/− Anzahl, Enter bieten, L Lügner, G Genau, M stumm, Esc schließt -----
+  document.addEventListener('keydown', (e) => {
+    if (e.ctrlKey || e.metaKey || e.altKey || isTyping(e)) return;
+    if (e.key === 'Escape') {
+      ['rules-modal', 'log-modal'].forEach((id) => hide($(id)));
+      if (!setPop.classList.contains('hidden')) { setPop.classList.add('hidden'); setBtn.classList.remove('on'); }
+      if (!volPop.classList.contains('hidden')) { volPop.classList.add('hidden'); soundBtn.classList.remove('on'); }
+      return;
+    }
+    if ($('screen-game').classList.contains('hidden')) return;
+    if (!$('rules-modal').classList.contains('hidden') || !$('log-modal').classList.contains('hidden')) return;
+    const k = e.key.toLowerCase();
+    const bidOpen = !$('bid-panel').classList.contains('hidden');
+    const callOpen = !$('call-controls').classList.contains('hidden');
+    let used = false;
+    if (/^[1-6]$/.test(k) && bidOpen) used = selectFace(Number(k));
+    else if ((k === 'arrowup' || k === '+' || k === 'arrowright') && bidOpen) { stepQty(1); used = true; }
+    else if ((k === 'arrowdown' || k === '-' || k === 'arrowleft') && bidOpen) { stepQty(-1); used = true; }
+    else if (k === 'enter' && bidOpen && !e.repeat) { $('btn-bid').click(); used = true; }
+    else if (k === 'l' && callOpen && !e.repeat) { $('btn-liar').click(); used = true; }
+    else if (k === 'g' && callOpen && !$('btn-spot').classList.contains('hidden') && !e.repeat) { $('btn-spot').click(); used = true; }
+    else if (k === 'm' && !e.repeat) { setSoundOn(!soundOn); used = true; }
+    else if (k === 'c' && !e.repeat) { $('btn-toggle-players').click(); used = true; }
+    else if ((k === 'q' || k === 'e') && !$('spect-bar').classList.contains('hidden')) { stepSpect(k === 'q' ? -1 : 1); used = true; }
+    if (used) e.preventDefault();
+  });
   let spaceDown = false;
   document.addEventListener('keydown', (e) => {
     if (e.code !== 'Space' || e.repeat || isTyping(e)) return;
@@ -668,6 +812,8 @@
       status.textContent = 'Aufgedeckt …';
     } else if (me && me.eliminated) {
       status.textContent = '☠ Ausgeschieden – du schaust zu';
+    } else if (isWatching(state)) {
+      status.textContent = '👁 Du schaust zu – ab der nächsten Partie bist du dabei';
     } else if (rolling) {
       status.textContent = 'Alle schütteln ihre Becher …';
       setTimeout(() => { if (latestState === state) { state.rollMs = 0; renderControls(state); sync3d(false); } }, state.rollMs + 30);
@@ -767,7 +913,7 @@
     for (let f = minFace; f <= 6; f++) {
       const b = el('button', { class: 'face-btn' + (f === sel.face ? ' sel' : ''), type: 'button', title: `${f}er`, 'aria-label': `Augenzahl ${f}` }, [dieEl(f)]);
       b.disabled = minQtyFor(state, f) > state.totalDice;
-      b.addEventListener('click', () => { sel.face = f; renderBidPanel(state); bumpPreview(); });
+      b.addEventListener('click', () => selectFace(f));
       fr.appendChild(b);
     }
     $('qty-value').textContent = sel.qty;
@@ -778,6 +924,11 @@
     pv.appendChild(el('span', { class: 'x', text: '×' }));
     pv.appendChild(dieEl(sel.face));
     $('btn-bid').disabled = sel.sending;
+  }
+  function selectFace(f) {
+    const s = latestState; if (!s || !s.canRaise || $('bid-panel').classList.contains('hidden')) return false;
+    if ((s.settings.wildOnes && f === 1) || minQtyFor(s, f) > s.totalDice) return false;
+    sel.face = f; renderBidPanel(s); bumpPreview(); return true;
   }
   function bumpPreview() { const pv = $('bid-preview'); pv.classList.remove('bump'); void pv.offsetWidth; pv.classList.add('bump'); }
   function stepQty(d) {
@@ -831,6 +982,17 @@
   function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 
   // ----- Banner beim Aufdecken -----
+  // Wer die nächste Runde beginnt (wie im Server: wer verloren hat, sonst wer gerufen hat;
+  // ist die Person ausgeschieden, die nächste noch lebende Person in Sitzreihenfolge)
+  function nextStarter(state, r) {
+    const ps = state.players;
+    let id = r.loserId || r.callerId;
+    const p = ps.find((q) => q.id === id);
+    if (p && !p.eliminated && p.dice > 0) return id;
+    const i = ps.findIndex((q) => q.id === id);
+    for (let k = 1; k <= ps.length; k++) { const q = ps[(i + k) % ps.length]; if (q && !q.eliminated && q.dice > 0) return q.id; }
+    return null;
+  }
   let bannerTimer = null;
   function renderBanner(state) {
     const b = $('banner');
@@ -847,6 +1009,10 @@
     if (r.kind === 'spot') verdict = r.correct ? `Genau richtig! ${caller}${r.gainerId ? ' bekommt einen Würfel zurück' : ' behält alle Würfel'}.` : `Daneben – ${caller} verliert einen Würfel.`;
     else verdict = r.correct ? `${bidder} hat gelogen und verliert einen Würfel.` : `Das Gebot stimmt – ${caller} verliert einen Würfel.`;
     b.appendChild(el('div', { class: 'small', text: verdict + (r.wildOnes && r.bid.face !== 1 ? ' (Einsen zählen mit)' : '') }));
+    if (state.gamePhase === 'reveal') {
+      const st = nextStarter(state, r);
+      if (st) b.appendChild(el('div', { class: 'next-up', html: st === myId() ? '▶ <b>Du</b> beginnst die nächste Runde' : `▶ <b>${escapeHtml(pname(state, st))}</b> beginnt die nächste Runde` }));
+    }
     show(b);
   }
 
@@ -917,6 +1083,7 @@
         container: $('canvas-host'),
         onCupClick: () => setPeeking(!peeking),
         onLook: (yaw) => socket.emit('look', { yaw }),
+        quality,
         sound,
       });
       b3 = m;
@@ -946,7 +1113,7 @@
       reveal: s.reveal,
       myDice: myDice ? myDice.dice : null,
       myDiceRound: myDice ? myDice.round : -1,
-      spectDice: myDice && myDice.others && s.players.some((p) => p.id === myId() && p.eliminated) ? myDice.others : null,
+      spectDice: myDice && myDice.others && (s.players.some((p) => p.id === myId() && p.eliminated) || isWatching(s)) ? myDice.others : null,
       expectAnim: !!expectAnim,
       totalDice: s.totalDice,
       startDice: s.startDice,

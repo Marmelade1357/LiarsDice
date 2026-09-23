@@ -65,6 +65,9 @@ let lantern = null, lanternLight = null, centerSprite = null, centerKey = '';
 let water = null, sky = null, fronds = [], torches = [], ships = [], flags = [], critters = {};
 let sunLight = null;
 let lastChallenge = null;
+// Zuschauen (nach dem Ausscheiden): fremde Würfel sichtbar, Kamera hinter einer anderen Ente
+let spectId = null, spectDice = null, camSmooth = false;
+export function setSpectate(id) { spectId = id || null; camSmooth = true; }
 // Kameraflug zum Spielstart und Kamerafahrt zur Siegerente
 let introStart = 0, winFocus = null;
 const INTRO_MS = 3600;
@@ -1780,10 +1783,14 @@ export function update(view) {
     const s = seats[p.id]; if (!s) return;
     updateLabel(s, p, view);
     s.turn = view.currentTurnId === p.id;
+    if (s.out && !p.eliminated) { s.out = false; if (!s.anim) s.cupRoot.visible = true; }
+    if (view.phase === 'lobby') s.cheer = false;
     if (!s.isMe && p.peeking !== undefined) s.peekOn = !!p.peeking;
     if (!s.isMe && p.look !== undefined && !p.isBot) s.lookYaw = p.look;
   });
   if (view.myDice) myDiceCache = { round: view.myDiceRound, dice: view.myDice };
+  spectDice = view.spectDice && view.phase === 'playing' ? { round: view.myDiceRound, dice: view.spectDice } : null;
+  if (!spectDice) spectId = null;
   // Eigene Würfel nachreichen, falls sie nach dem Aufknallen eintreffen
   const me = seats[view.meId];
   if (me && view.gamePhase === 'bidding' && !me.anim && me.pose.flip < 0.01 && view.myDiceRound === view.roundNo && me.diceRound !== view.roundNo && view.myDice) {
@@ -1870,8 +1877,11 @@ export function events(list) {
         reveal = null; countSprite.visible = false;
         seatOrder.forEach((s) => { s.cheer = false; });
         winFocus = null;
+        particles.forEach((pt) => scene.remove(pt.m)); particles = [];
         seatOrder.forEach((s) => {
           const p = v.players.find((q) => q.id === s.id);
+          // Neue Partie: wer wieder mitspielt, sitzt wieder aufrecht (kein hängender Kopf mehr)
+          s.out = !!(p && p.eliminated); s.expr = null; s.idle = null;
           if (!p || p.eliminated) { s.cupRoot.visible = false; clearDice(s); return; }
           s.cupRoot.visible = true;
           s.peekOn = false;
@@ -2152,6 +2162,12 @@ function tick() {
       if (s.ringKey !== 'full') { s.ringKey = 'full'; s.ring.geometry.dispose(); s.ring.geometry = new THREE.RingGeometry(0.2, 0.235, 48); s.ring.material.color.set(0xf4c95d); }
       s.ring.material.opacity = s.turn ? 0.45 + Math.sin(t * 5) * 0.3 : 0;
     }
+    // Zuschauer: Becher der anderen durchsichtig, Würfel darunter sichtbar
+    const sd = !s.isMe && spectDice && v && v.gamePhase === 'bidding' && spectDice.round === v.roundNo ? spectDice.dice[s.id] : null;
+    const body = s.cup.userData.body;
+    if (sd && !s.xray) { s.xray = body.material; body.material = body.material.clone(); body.material.transparent = true; body.material.opacity = 0.3; body.material.depthWrite = false; }
+    else if (!sd && s.xray) { body.material.dispose(); body.material = s.xray; s.xray = null; }
+    if (sd && !s.anim && P.flip < 0.01 && s.diceRound !== 'sp' + v.roundNo) { placeDice(s, sd, 'sp' + v.roundNo); s.diceRound = 'sp' + v.roundNo; }
     // Würfel beim Aufdecken leuchten lassen
     s.dice.forEach((m) => { if (m.userData.match) m.material.forEach((mat) => { mat.emissiveIntensity = 0.35 + Math.sin(t * 5) * 0.2; }); });
     // Sprechblasen
@@ -2266,7 +2282,7 @@ function tick() {
     const wantLean = myPeek && canPeek(me) ? 1 : 0;
     peekBlend += (wantLean - peekBlend) * Math.min(1, dt * 6);
     // Automatisch sanft zur Person drehen, die gerade dran ist (außer man schaut sich selbst um)
-    if (now - lastManualLook > 5000 && peekBlend < 0.05) {
+    if (now - lastManualLook > 5000 && peekBlend < 0.05 && !spectId) {
       let ay = 0;
       const ts = v.gamePhase === 'bidding' && v.currentTurnId && v.currentTurnId !== v.meId ? seats[v.currentTurnId] : null;
       if (ts) { _v3.copy(ts.frame.position); me.frame.worldToLocal(_v3); ay = clamp(Math.atan2(-_v3.x, -_v3.z) * 0.55, -0.85, 0.85); }
@@ -2314,6 +2330,21 @@ function tick() {
       _m.lookAt(_v1, _v2, _up); _q2.setFromRotationMatrix(_m);
       eye.lerp(_v1, k); _q1.slerp(_q2, k);
     } else if (winFocus && v.phase !== 'gameover') winFocus = null;
+    // Zuschauer-Kamera: über die Schulter der gewählten Ente, weich überblendet
+    const spS = spectId && seats[spectId] && !seats[spectId].isMe ? seats[spectId] : null;
+    if (spS && !introStart && !(winFocus && !winFocus.released && v.phase === 'gameover')) {
+      _v1.set(0.32, 1.62, 0.82); spS.frame.localToWorld(_v1);
+      _v2.set(0, TABLE_Y + 0.05, -(seatR - tableR) - 0.55); spS.frame.localToWorld(_v2);
+      _m.lookAt(_v1, _v2, _up); _q2.setFromRotationMatrix(_m);
+      _e.setFromQuaternion(_q2, 'YXZ'); _e.y += yaw; _e.x += (pitch - basePitch) * 0.8; _q2.setFromEuler(_e);
+      eye.copy(_v1); _q1.copy(_q2);
+    }
+    if (camSmooth) {
+      const k = Math.min(1, dt * 3.5);
+      camera.position.lerp(eye, k); camera.quaternion.slerp(_q1, k);
+      if (camera.position.distanceTo(eye) < 0.01) camSmooth = !!spS;
+      _q1.copy(camera.quaternion); eye.copy(camera.position);
+    }
     camera.position.copy(eye);
     if (shakeT > 0) { shakeT = Math.max(0, shakeT - dt); camera.position.y += Math.sin(t * 90) * shakeT * 0.02; }
     camera.quaternion.copy(_q1);

@@ -51,6 +51,17 @@ async function main() {
     const bad = await emitAsync(notMe, 'bid', { qty: 1, face: 3 });
     assert(!bad.ok, 'nicht dran');
 
+    // Zuschauer: fremde Würfel nur an Ausgeschiedene
+    const leaks = []; let spectated = 0;
+    [[host, created.playerId], [guest, joined.playerId]].forEach(([sock, id]) => {
+      sock.on('gameState', (s) => { sock._st = s; });
+      sock.on('yourDice', (d) => {
+        if (!d.others) return;
+        const s = sock._st || host._last; const me = s && s.players.find((p) => p.id === id);
+        if (!me || !me.eliminated) leaks.push(id); else spectated++;
+        if (Object.keys(d.others).includes(id)) leaks.push('self');
+      });
+    });
     attachAutopilot(host, () => created.playerId, host._last);
     attachAutopilot(guest, () => joined.playerId, host._last);
     // Ein Reveal muss irgendwann kommen und alle Würfel zeigen
@@ -59,6 +70,8 @@ async function main() {
     const end = await waitForState(host, (s) => s.phase === 'gameover', 120000);
     assert(end.winnerId && end.placements.length === 4 && end.placements[0].id === end.winnerId, 'Spielende mit Platzierung');
     assert(end.players.find((p) => p.id === end.winnerId).wins === 1, 'Siegzähler');
+    assert(leaks.length === 0, 'fremde Würfel gehen nur an ausgeschiedene Zuschauer');
+    console.log(`OK: flow.test.js - Zuschauer-Würfel (${spectated} Nachrichten an Ausgeschiedene)`);
 
     host.emit('resetGame');
     const back = await waitForState(host, (s) => s.phase === 'lobby');

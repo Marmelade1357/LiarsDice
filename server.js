@@ -262,7 +262,13 @@ function publicState(room) {
 function sendDiceTo(room, player) {
   if (!player.socketId) return;
   const g = room.game;
-  io.to(player.socketId).emit('yourDice', { round: g ? g.roundNo : 0, dice: g && g.dice[player.id] ? g.dice[player.id] : [] });
+  const data = { round: g ? g.roundNo : 0, dice: g && g.dice[player.id] ? g.dice[player.id] : [] };
+  // Ausgeschiedene schauen zu und dürfen die Würfel aller anderen sehen
+  if (g && room.phase === 'playing' && g.out.includes(player.id)) {
+    data.others = {};
+    room.players.forEach((q) => { if (q.id !== player.id && g.dice[q.id] && g.dice[q.id].length) data.others[q.id] = g.dice[q.id]; });
+  }
+  io.to(player.socketId).emit('yourDice', data);
 }
 
 function turnLimitMs(room) { return TURN_MS_OVERRIDE || (room.settings.turnSec || 0) * 1000; }

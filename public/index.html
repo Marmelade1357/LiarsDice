@@ -136,11 +136,17 @@
 
     <!-- Oben rechts: Navigation -->
     <nav class="hud-nav" aria-label="Spielmenü">
-      <button id="btn-toggle-sound" class="icon-btn" type="button" data-tip="Ton an/aus" aria-label="Ton an/aus">🔊</button>
+      <button id="btn-toggle-sound" class="icon-btn" type="button" data-tip="Lautstärke" aria-label="Lautstärke">🔊</button>
       <button id="btn-toggle-players" class="icon-btn" type="button" data-tip="Crew" aria-label="Crew">👥</button>
       <button id="btn-show-log" class="icon-btn" type="button" data-tip="Verlauf" aria-label="Verlauf">📜</button>
       <button id="btn-show-rules" class="icon-btn" type="button" data-tip="Regeln" aria-label="Regeln">📖</button>
       <button id="btn-leave-game" class="icon-btn icon-leave" type="button" data-tip="Spiel verlassen" aria-label="Spiel verlassen">✕</button>
+      <!-- Lautstärke -->
+      <div id="volume-pop" class="hud-panel volume-pop hidden" role="dialog" aria-label="Lautstärke">
+        <div class="vol-head"><span class="hud-label">Lautstärke</span><span id="volume-value" class="vol-value"></span></div>
+        <input id="volume-range" class="vol-range" type="range" min="0" max="100" step="1" aria-label="Lautstärke" />
+        <button id="volume-mute" class="hud-btn small secondary" type="button"></button>
+      </div>
     </nav>
 
     <!-- Aktuelles Gebot: schwebt über der Ente, die es abgegeben hat -->
@@ -157,6 +163,14 @@
       <div id="peek-hud" class="peek-hud hidden"></div>
       <!-- Aufdeck-Ergebnis -->
       <div id="banner" class="hud-panel banner hidden"></div>
+      <!-- Zuschauen (nach dem Ausscheiden) -->
+      <div id="spect-bar" class="hud-panel spect-bar hidden">
+        <span class="hud-label">Zuschauen</span>
+        <button id="spect-prev" class="step-btn" type="button" aria-label="Vorherige Ente">‹</button>
+        <span id="spect-name" class="spect-name"></span>
+        <button id="spect-next" class="step-btn" type="button" aria-label="Nächste Ente">›</button>
+        <span id="spect-dice" class="spect-dice"></span>
+      </div>
       <div id="status-pill" class="hud-panel status-pill">
         <div id="turn-timer" class="turn-ring hidden" aria-hidden="true">
           <svg viewBox="0 0 36 36"><circle class="track" cx="18" cy="18" r="15.5"></circle><circle class="prog" cx="18" cy="18" r="15.5"></circle></svg>

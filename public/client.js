@@ -22,6 +22,8 @@
   let myDice = { round: 0, dice: [] };
   let lastSeq = null;
   let soundOn = safeGet(SOUND_KEY) !== 'off';
+  const VOLUME_KEY = 'liars_volume';
+  let volume = (() => { const v = Number(safeGet(VOLUME_KEY)); return Number.isFinite(v) && safeGet(VOLUME_KEY) !== null ? Math.max(0, Math.min(1, v)) : 0.8; })();
   let peeking = false;
   let peekMap = {};           // playerId -> true (schaut gerade nach)
   let sel = { face: null, qty: 1, key: null, sending: false };
@@ -33,13 +35,18 @@
   // ---------------------------------------------------------------------
   // Sound (synthetisiert, keine Dateien)
   // ---------------------------------------------------------------------
-  let audioCtx = null; let noiseBuf = null; let waves = null;
+  let audioCtx = null; let noiseBuf = null; let waves = null; let masterGain = null;
+  // Gesamtlautstärke: quadratisch, damit der Regler sich gleichmäßig anfühlt
+  function applyVolume() { if (masterGain) masterGain.gain.setTargetAtTime(soundOn ? volume * volume * 1.25 : 0, audioCtx.currentTime, 0.03); }
+  function out() { ctx(); return masterGain; }
   function ctx() {
     if (!audioCtx) {
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       noiseBuf = audioCtx.createBuffer(1, audioCtx.sampleRate * 2, audioCtx.sampleRate);
       const d = noiseBuf.getChannelData(0);
       for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+      masterGain = audioCtx.createGain(); masterGain.connect(audioCtx.destination);
+      masterGain.gain.value = soundOn ? volume * volume * 1.25 : 0;
     }
     return audioCtx;
   }
@@ -51,7 +58,7 @@
       o.frequency.value = freq; o.type = type || 'sine';
       g.gain.setValueAtTime(0, t0); g.gain.linearRampToValueAtTime(vol || 0.12, t0 + 0.01);
       g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-      o.connect(g).connect(c.destination); o.start(t0); o.stop(t0 + dur + 0.02);
+      o.connect(g).connect(out()); o.start(t0); o.stop(t0 + dur + 0.02);
     } catch (e) { /* kein Audio */ }
   }
   function noise(dur, vol, freq, q, delay) {
@@ -62,7 +69,7 @@
       const f = c.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = freq; f.Q.value = q || 1;
       const g = c.createGain();
       g.gain.setValueAtTime(vol, t0); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-      src.connect(f).connect(g).connect(c.destination);
+      src.connect(f).connect(g).connect(out());
       src.start(t0, Math.random() * 1.5); src.stop(t0 + dur + 0.02);
     } catch (e) { /* kein Audio */ }
   }
@@ -94,7 +101,7 @@
           const f2 = c.createBiquadFilter(); f2.type = 'bandpass'; f2.frequency.value = 2300 * p; f2.Q.value = 6;
           const g = c.createGain(); const g2 = c.createGain(); g2.gain.value = 0.5;
           g.gain.setValueAtTime(0, t0); g.gain.linearRampToValueAtTime(0.5 * v, t0 + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.22);
-          o.connect(f1).connect(g); o.connect(f2).connect(g2).connect(g); g.connect(c.destination);
+          o.connect(f1).connect(g); o.connect(f2).connect(g2).connect(g); g.connect(out());
           o.start(t0); o.stop(t0 + 0.25);
         }
       } catch (e) { /* kein Audio */ }
@@ -119,7 +126,7 @@
       const lfo = c.createOscillator(); lfo.frequency.value = 0.12;
       const lg = c.createGain(); lg.gain.value = 0.018;
       lfo.connect(lg).connect(g.gain);
-      src.connect(f).connect(g).connect(c.destination);
+      src.connect(f).connect(g).connect(out());
       src.start(); lfo.start();
       waves = { src, lfo, g };
     } catch (e) { /* egal */ }
@@ -332,12 +339,34 @@
     if (!latestState) return;
     latestState.logs.slice().reverse().forEach((l) => list.appendChild(el('li', { text: l.text })));
   }
+  // Ton: Klick öffnet den Lautstärkeregler (mit Stumm-Schalter)
   const soundBtn = $('btn-toggle-sound');
-  soundBtn.textContent = soundOn ? '🔊' : '🔇';
-  soundBtn.addEventListener('click', () => {
-    soundOn = !soundOn; safeSet(SOUND_KEY, soundOn ? 'on' : 'off'); soundBtn.textContent = soundOn ? '🔊' : '🔇';
-    if (soundOn) startWaves(); else stopWaves();
+  const volPop = $('volume-pop'); const volRange = $('volume-range'); const volMute = $('volume-mute'); const volVal = $('volume-value');
+  function soundIcon() { return !soundOn || volume === 0 ? '🔇' : volume < 0.45 ? '🔉' : '🔊'; }
+  function renderVolume() {
+    soundBtn.textContent = soundIcon();
+    volRange.value = String(Math.round(volume * 100));
+    volRange.style.setProperty('--fill', `${Math.round(volume * 100)}%`);
+    volVal.textContent = soundOn ? `${Math.round(volume * 100)} %` : 'stumm';
+    volMute.textContent = soundOn ? '🔇 Stumm' : '🔊 Ton an';
+    volMute.classList.toggle('on', !soundOn);
+    volPop.classList.toggle('muted', !soundOn);
+  }
+  function setSoundOn(on) {
+    soundOn = on; safeSet(SOUND_KEY, soundOn ? 'on' : 'off');
+    if (soundOn) { try { ctx().resume(); } catch (e) { /* egal */ } startWaves(); } else stopWaves();
+    applyVolume(); renderVolume();
+  }
+  soundBtn.addEventListener('click', (e) => { e.stopPropagation(); volPop.classList.toggle('hidden'); soundBtn.classList.toggle('on', !volPop.classList.contains('hidden')); });
+  volRange.addEventListener('input', () => {
+    volume = Math.max(0, Math.min(1, Number(volRange.value) / 100)); safeSet(VOLUME_KEY, String(volume));
+    if (!soundOn && volume > 0) { setSoundOn(true); return; }
+    applyVolume(); renderVolume();
   });
+  volRange.addEventListener('change', () => sound('bid', 1));
+  volMute.addEventListener('click', () => setSoundOn(!soundOn));
+  document.addEventListener('pointerdown', (e) => { if (!volPop.classList.contains('hidden') && !volPop.contains(e.target) && e.target !== soundBtn) { volPop.classList.add('hidden'); soundBtn.classList.remove('on'); } });
+  renderVolume();
   // Crew-Übersicht: auf kleinen Bildschirmen standardmäßig eingeklappt
   let crewOpen = safeGet(CREW_KEY) ? safeGet(CREW_KEY) === 'open' : window.innerWidth > 720;
   function applyCrew() { $('crew-panel').classList.toggle('collapsed', !crewOpen); }
@@ -359,10 +388,13 @@
     }
   });
 
+  let lastOthersKey = 'null';
   socket.on('yourDice', (data) => {
     const changed = !myDice || data.round !== myDice.round || JSON.stringify(data.dice) !== JSON.stringify(myDice.dice);
     myDice = data || myDice;
-    if (changed && latestState) { renderPeekHud(); sync3d(); renderFlat(latestState); if (latestState.phase === 'playing') renderControls(latestState); }
+    const othersChanged = JSON.stringify((data && data.others) || null) !== lastOthersKey;
+    lastOthersKey = JSON.stringify((data && data.others) || null);
+    if ((changed || othersChanged) && latestState) { renderPeekHud(); sync3d(); renderFlat(latestState); if (latestState.phase === 'playing') { renderControls(latestState); renderCrew(latestState); renderSpect(latestState); } }
   });
   socket.on('actionError', (d) => toast(d.error));
   socket.on('peek', (d) => {
@@ -440,6 +472,7 @@
     $('round-badge').innerHTML = state.roundNo ? `Runde ${state.roundNo}<span class="sub"> · ${shownTotal} 🎲</span>` : '';
     renderCrew(state);
     renderControls(state);
+    renderSpect(state);
     renderBanner(state);
     renderPeekHud();
     renderFlat(state);
@@ -533,10 +566,44 @@
         el('span', { class: 'nm', text: (p.isBot ? '🤖 ' : '') + p.name, title: p.name }),
       ];
       if (peekMap[p.id] || (p.id === myId() && peeking)) kids.push(el('span', { class: 'peek', text: '👁', title: 'schaut unter den Becher' }));
-      kids.push(pips);
+      const faces = p.id !== myId() ? spectDiceFor(state, p.id) : null;
+      if (faces) { const fd2 = el('span', { class: 'fdice', title: 'Nur für Zuschauer sichtbar' }); faces.slice().sort((a, b) => a - b).forEach((v) => fd2.appendChild(dieEl(v))); kids.push(fd2); }
+      else kids.push(pips);
       list.appendChild(el('li', { class: cls.join(' ') }, kids));
     });
   }
+
+  // ----- Zuschauen (ausgeschieden): fremde Würfel sehen, Blick hinter andere Enten -----
+  let spectTarget = null;
+  function spectDiceFor(state, id) {
+    if (!state || state.phase !== 'playing' || state.gamePhase !== 'bidding') return null;
+    const o = myDice && myDice.others && myDice.round === state.roundNo ? myDice.others : null;
+    return o && o[id] ? o[id] : null;
+  }
+  function spectCandidates(state) { return [null].concat(state.players.filter((p) => p.id !== myId() && !p.eliminated).map((p) => p.id)); }
+  function renderSpect(state) {
+    const bar = $('spect-bar');
+    const me = state.players.find((p) => p.id === myId());
+    const active = state.phase === 'playing' && me && me.eliminated;
+    if (!active) { hide(bar); if (spectTarget) { spectTarget = null; if (b3 && b3.setSpectate) b3.setSpectate(null); } return; }
+    const cands = spectCandidates(state);
+    if (!cands.includes(spectTarget)) { spectTarget = null; if (b3 && b3.setSpectate) b3.setSpectate(null); }
+    $('spect-name').textContent = spectTarget ? pname(state, spectTarget) : 'Eigener Platz';
+    const box = $('spect-dice'); box.innerHTML = '';
+    const d = spectTarget ? spectDiceFor(state, spectTarget) : null;
+    if (d) d.slice().sort((a, b) => a - b).forEach((v) => box.appendChild(dieEl(v)));
+    show(bar);
+  }
+  function stepSpect(dir) {
+    const s = latestState; if (!s) return;
+    const cands = spectCandidates(s);
+    const i = Math.max(0, cands.indexOf(spectTarget));
+    spectTarget = cands[(i + dir + cands.length) % cands.length];
+    if (b3 && b3.setSpectate) b3.setSpectate(spectTarget);
+    renderSpect(s);
+  }
+  $('spect-prev').addEventListener('click', () => stepSpect(-1));
+  $('spect-next').addEventListener('click', () => stepSpect(1));
 
   // ----- Gucken -----
   function canPeekNow() {
@@ -826,6 +893,7 @@
       const row = el('div', { class: 'row' });
       if (r && r.dice && r.dice[p.id]) r.dice[p.id].forEach((v) => row.appendChild(dieEl(v, (v === r.bid.face || (r.wildOnes && v === 1 && r.bid.face !== 1)) ? 'match sm' : 'dim sm')));
       else if (p.eliminated) row.appendChild(el('span', { text: '☠ raus' }));
+      else if (p.id !== myId() && spectDiceFor(state, p.id)) spectDiceFor(state, p.id).forEach((v) => row.appendChild(dieEl(v, 'sm')));
       else row.appendChild(el('span', { text: `🥤 ${p.dice} Würfel` }));
       seat.appendChild(row);
       if (state.bid && state.bid.id === p.id) seat.appendChild(el('div', { class: 'bubble' }, [document.createTextNode(`${state.bid.qty} ×`), dieEl(state.bid.face, 'sm')]));
@@ -878,6 +946,7 @@
       reveal: s.reveal,
       myDice: myDice ? myDice.dice : null,
       myDiceRound: myDice ? myDice.round : -1,
+      spectDice: myDice && myDice.others && s.players.some((p) => p.id === myId() && p.eliminated) ? myDice.others : null,
       expectAnim: !!expectAnim,
       totalDice: s.totalDice,
       startDice: s.startDice,

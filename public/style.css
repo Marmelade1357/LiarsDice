@@ -257,6 +257,36 @@ input[type="checkbox"] { width: auto; }
   display: flex; gap: 6px;
 }
 
+/* ---- Lautstärke-Regler (klappt unter dem Ton-Symbol auf) ---- */
+.volume-pop {
+  position: absolute; top: calc(100% + 8px); right: 0; width: 230px; padding: 12px 14px; z-index: 70;
+  display: flex; flex-direction: column; gap: 10px; animation: panel-in 0.2s var(--hud-ease);
+}
+.vol-head { display: flex; justify-content: space-between; align-items: baseline; }
+.vol-value { font: 700 0.85em "Segoe UI", Arial, sans-serif; color: var(--hud-gold); }
+.volume-pop.muted .vol-value { color: var(--hud-muted); }
+.vol-range {
+  -webkit-appearance: none; appearance: none; width: 100%; height: 6px; padding: 0; border: 0; border-radius: 3px; outline: none; cursor: pointer;
+  background: linear-gradient(90deg, var(--hud-gold) 0 var(--fill, 80%), rgba(255, 240, 210, 0.16) var(--fill, 80%) 100%);
+}
+.volume-pop.muted .vol-range { filter: grayscale(1) brightness(0.8); }
+.vol-range::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%; background: #f0cd84; border: 2px solid #3a2410; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5); }
+.vol-range::-moz-range-thumb { width: 16px; height: 16px; border-radius: 50%; background: #f0cd84; border: 2px solid #3a2410; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5); }
+.vol-range:focus-visible { outline: 2px solid rgba(233, 196, 122, 0.7); outline-offset: 4px; }
+.volume-pop .hud-btn { align-self: flex-start; }
+
+@media (hover: hover) { .hud-nav .icon-btn.on[data-tip]:hover::after { display: none; } }
+
+/* ---- Zuschauen ---- */
+.spect-bar { display: flex; align-items: center; gap: 10px; padding: 8px 12px; animation: panel-in 0.3s var(--hud-ease); }
+.spect-name { min-width: 7em; text-align: center; font-weight: 700; color: var(--hud-cream); white-space: nowrap; }
+.spect-dice { display: inline-flex; gap: 4px; }
+.spect-dice .die { --s: 22px; }
+.spect-bar .step-btn { width: 2em; height: 2em; }
+.crew-row .fdice { display: inline-flex; gap: 2px; }
+.crew-row .fdice .die { --s: 14px; border-radius: 3px; }
+@media (max-width: 720px) { .spect-bar { gap: 6px; padding: 6px 8px; } .spect-name { min-width: 5em; font-size: 0.9em; } .spect-dice .die { --s: 18px; } }
+
 /* ---- Oben links: Runde + Crew ---- */
 .crew-panel {
   position: absolute; top: calc(var(--hud-gap) + env(safe-area-inset-top)); left: var(--hud-gap); z-index: 30;

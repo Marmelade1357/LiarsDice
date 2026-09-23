@@ -1841,7 +1841,7 @@ function tick() {
         const blink = bt > 0 && bt < 1 ? Math.sin(bt * Math.PI) : 0;
         if (bt >= 1) s.nextBlink = now + 2000 + Math.random() * 3500;
         // Lider: leicht verschmitzt halb geschlossen, beim Nachschauen/Ausscheiden weiter zu
-        const base = s.out ? 0.85 : (s.peek > 0.3 ? 0.35 : 0);
+        const base = s.out ? 0.8 : (s.peek > 0.3 ? 0.3 : 0.06);
         parts.lids.forEach((l) => { l.pivot.rotation.x = THREE.MathUtils.lerp(l.open, l.closed, Math.max(base, blink)); });
       }
     }
@@ -1941,5 +1941,26 @@ export function debugCounts() {
   const seat = Object.values(seats)[1];
   let sn = 0; if (seat) seat.frame.traverse((o) => { if (o.isMesh) sn++; });
   out.perSeatFrame = sn;
+  return out;
+}
+
+// Nur für Tests: Enten-Galerie am Strand (hinter dem eigenen Platz), zum Begutachten der Modelle
+export function debugGallery(ids, lid) {
+  const out = [];
+  ids.forEach((id, i) => {
+    const parts = buildCharacter(id, false);
+    const g = parts.g;
+    g.position.set((i - (ids.length - 1) / 2) * 0.9, 0, 3.6);
+    g.rotation.y = Math.PI; // Blick zur Kamera (+z)
+    scene.add(g);
+    if (parts.lids && lid !== undefined) parts.lids.forEach((l) => { l.pivot.rotation.x = THREE.MathUtils.lerp(l.open, l.closed, lid); });
+    // Flügel in Ruhe: seitlich am Körper
+    const sh = parts.shoulder;
+    parts.arms.forEach((a) => {
+      const s0 = new THREE.Vector3(a.side * sh.x, sh.y, sh.z);
+      solveArm(a, s0, new THREE.Vector3(a.side * 0.26, 0.55, -0.12));
+    });
+    out.push([g.position.x, g.position.z]);
+  });
   return out;
 }

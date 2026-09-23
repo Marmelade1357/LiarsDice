@@ -32,8 +32,8 @@ function mk(geo, mat, cast = true, recv = true) { const m = new THREE.Mesh(geo, 
 
 // Körperprofil (r, y) - birnenförmig, oben in den Hals übergehend
 const BODY_PROFILE = [
-  [0.0, 0.0], [0.09, 0.004], [0.155, 0.022], [0.2, 0.06], [0.222, 0.11], [0.226, 0.16], [0.216, 0.21],
-  [0.192, 0.265], [0.158, 0.315], [0.126, 0.36], [0.104, 0.405], [0.094, 0.45], [0.09, 0.49],
+  [0.0, 0.0], [0.09, 0.004], [0.155, 0.022], [0.2, 0.06], [0.222, 0.11], [0.226, 0.16], [0.217, 0.21],
+  [0.196, 0.26], [0.168, 0.305], [0.142, 0.345], [0.124, 0.385], [0.114, 0.425], [0.108, 0.465], [0.104, 0.5],
 ];
 function lathe(profile, seg, phiStart, phiLen) {
   return new THREE.LatheGeometry(profile.map(([r, y]) => new THREE.Vector2(r, y)), seg, phiStart || 0, phiLen === undefined ? Math.PI * 2 : phiLen);
@@ -154,7 +154,7 @@ export function buildDuck(id, isMe, h) {
 
   const body = new THREE.Group(); g.add(body); parts.body = body;
   body.position.set(0, 0.46, 0.04);
-  parts.shoulder = { x: 0.2, y: 0.46 + 0.3, z: -0.01 };
+  parts.shoulder = { x: 0.195, y: 0.46 + 0.31, z: 0.0 };
 
   if (!isMe) {
     // Beinchen + Schwimmfüße (baumeln vorn am Fass)
@@ -184,11 +184,11 @@ export function buildDuck(id, isMe, h) {
     const mBodyV = mBody.clone(); mBodyV.color.set(0xffffff); mBodyV.vertexColors = true;
     torso.add(mk(bodyGeo, mBodyV));
     // Schwanzbürzel
-    const tail = mk(lathe([[0, 0], [0.05, 0.03], [0.065, 0.08], [0.045, 0.14], [0.0, 0.19]], 14), mBody);
-    tail.scale.set(1.3, 1, 0.6); tail.position.set(0, 0.14, 0.2); tail.rotation.x = 1.05; torso.add(tail);
+    const tail = mk(lathe([[0, 0], [0.055, 0.02], [0.072, 0.06], [0.06, 0.11], [0.03, 0.15], [0.0, 0.165]], 16), mBody);
+    tail.scale.set(1.35, 1, 0.55); tail.position.set(0, 0.035, 0.2); tail.rotation.x = 1.2; torso.add(tail);
 
     // Piratenmantel: vorne offen, mit goldener Borte, Knöpfen, Kragen und Gürtel
-    const coatProf = BODY_PROFILE.filter(([, y]) => y >= 0.06 && y <= 0.34).map(([r, y]) => [r * 1.07 + 0.004, y]);
+    const coatProf = BODY_PROFILE.filter(([, y]) => y >= 0.06 && y <= 0.39).map(([r, y]) => [r * 1.07 + 0.004, y]);
     coatProf.unshift([profileAt(0.035) * 1.07 + 0.012, 0.035]);
     const gap = 0.95;
     const coatGeo = lathe(coatProf, 40, Math.PI + gap / 2, Math.PI * 2 - gap);
@@ -209,88 +209,101 @@ export function buildDuck(id, isMe, h) {
       btn.position.copy(pOf(profileAt(y) * 1.07 + 0.012, y, Math.PI + sd * (gap / 2 + 0.12)));
       torso.add(btn);
     }));
-    const collar = mk(new THREE.TorusGeometry(0.118, 0.026, 8, 24, Math.PI * 1.45), mCoat);
-    collar.rotation.set(Math.PI / 2, 0, Math.PI / 2 + Math.PI * 0.275 + Math.PI); collar.position.y = 0.345; collar.scale.set(1, 1.1, 1); torso.add(collar);
+    const cr = profileAt(0.385) * 1.07 + 0.004;
+    const collarGeo = lathe([[cr - 0.004, 0.37], [cr + 0.006, 0.385], [cr + 0.016, 0.415], [cr + 0.03, 0.44], [cr + 0.024, 0.446]], 36, Math.PI + gap / 2 + 0.25, Math.PI * 2 - gap - 0.5);
+    collarGeo.scale(1, 1, 1.1);
+    torso.add(mk(collarGeo, mCoat2));
     const belt = mk(new THREE.TorusGeometry(profileAt(0.12) * 1.1 + 0.004, 0.016, 6, 40), new THREE.MeshStandardMaterial({ color: 0x2e1d10, roughness: 0.55 }));
     belt.rotation.x = Math.PI / 2; belt.scale.set(1, 1.1, 1); belt.position.y = 0.12; torso.add(belt);
     const buckle = mk(new THREE.TorusGeometry(0.022, 0.006, 4, 4), mGold, false, false);
     buckle.rotation.z = Math.PI / 4; buckle.position.set(0, 0.12, -(profileAt(0.12) * 1.1 + 0.004) * 1.1 - 0.012); torso.add(buckle);
     // Halstuch
     const scarfMat = cloth(SCARVES[(hash >>> 20) % SCARVES.length]);
-    const scarf = mk(new THREE.TorusGeometry(0.098, 0.024, 8, 24), scarfMat); scarf.rotation.x = Math.PI / 2 - 0.15; scarf.position.set(0, 0.405, -0.005); torso.add(scarf);
-    const knot = mk(new THREE.SphereGeometry(0.026, 10, 8), scarfMat); knot.position.set(0.03, 0.385, -0.1); torso.add(knot);
-    const tip = mk(lathe([[0, 0], [0.022, 0.02], [0.02, 0.06], [0, 0.085]], 8), scarfMat); tip.position.set(0.035, 0.37, -0.105); tip.rotation.set(Math.PI, 0, 0.25); torso.add(tip);
+    const scarf = mk(new THREE.TorusGeometry(profileAt(0.425) * 1.02 + 0.006, 0.02, 8, 32), scarfMat); scarf.rotation.x = Math.PI / 2 - 0.08; scarf.scale.set(1, 1.1, 1); scarf.position.set(0, 0.425, 0); torso.add(scarf);
+    const knot = mk(new THREE.SphereGeometry(0.024, 10, 8), scarfMat); knot.position.set(0.02, 0.41, -0.13); torso.add(knot);
+    const tip = mk(lathe([[0, 0], [0.02, 0.018], [0.018, 0.055], [0, 0.08]], 8), scarfMat); tip.scale.set(1, 1, 0.45); tip.position.set(0.025, 0.4, -0.135); tip.rotation.set(Math.PI - 0.25, 0, 0.25); torso.add(tip);
 
     // Kopf
-    const head = new THREE.Group(); head.position.set(0, 0.555, -0.02); torso.add(head); parts.head = head;
-    const skull = mk(new THREE.SphereGeometry(0.14, 26, 18), mHead); skull.scale.set(1, 0.97, 1.05); head.add(skull);
-    // Wangen (etwas pausbäckig)
-    [-1, 1].forEach((sd) => { const ch = mk(new THREE.SphereGeometry(0.075, 16, 12), mHead); ch.position.set(sd * 0.07, -0.045, -0.06); head.add(ch); });
-    // Schnabel
-    const billTop = mk(billGeometry(0.13, 0.058, 0.026, false), mBill); billTop.position.set(0, -0.032, -0.16); billTop.rotation.x = 0.08; head.add(billTop);
-    const billLow = mk(billGeometry(0.11, 0.05, 0.016, true), mBill); billLow.position.set(0, -0.055, -0.145); billLow.rotation.x = -0.05; head.add(billLow);
-    [-1, 1].forEach((sd) => { const n = mk(new THREE.SphereGeometry(0.0035, 6, 4), mDark, false, false); n.scale.set(1, 0.6, 2); n.position.set(sd * 0.014, -0.006, -0.2); head.add(n); });
+    const head = new THREE.Group(); head.position.set(0, 0.565, -0.025); torso.add(head); parts.head = head;
+    const skull = mk(new THREE.SphereGeometry(0.14, 28, 20), mHead); skull.scale.set(1, 0.96, 1.06); head.add(skull);
+    // Schnabel: Oberschnabel steckt hinten im Kopf, Unterschnabel darunter eingezogen
+    // Schnabel aus einem Stück, mit dunkler Mundlinie
+    const billTop = mk(billGeometry(0.115, 0.06, 0.034, false), mBill); billTop.position.set(0, -0.036, -0.16); billTop.rotation.x = -0.05; head.add(billTop);
+    const mouth = mk(new THREE.TorusGeometry(0.052, 0.0025, 4, 24, Math.PI * 0.8), new THREE.MeshStandardMaterial({ color: 0x8a3a10, roughness: 0.7 }), false, false);
+    mouth.rotation.set(Math.PI / 2, 0, Math.PI * 1.1); mouth.scale.set(1.1, 1.9, 1); mouth.position.set(0, -0.041, -0.155); head.add(mouth);
+    const mNostril = new THREE.MeshStandardMaterial({ color: 0xa4521a, roughness: 0.6 });
+    [-1, 1].forEach((sd) => { const n = mk(new THREE.SphereGeometry(0.0032, 6, 4), mNostril, false, false); n.scale.set(1, 0.5, 2.2); n.position.set(sd * 0.013, -0.011, -0.212); head.add(n); });
 
-    // Augen mit Glanzpunkt und Lidern (Lider werden beim Blinzeln gedreht)
-    const mWhite = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.25 });
+    // Augen: großteils im Kopf versenkt (nur die Vorderseite wölbt sich heraus), mit Pupille,
+    // Glanzpunkt und Lid. Das Lid ist eine Kugelkappe, die offen hinter dem Auge im Kopf liegt
+    // und zum Blinzeln nach vorn über das Auge klappt.
+    const mWhite = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.3 });
     const mPupil = new THREE.MeshStandardMaterial({ color: 0x0b0b0b, roughness: 0.15 });
     const mShine = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    const mBrow = new THREE.MeshStandardMaterial({ color: new THREE.Color(pl[1]).multiplyScalar(0.5), roughness: 0.85 });
     const patch = (hash >>> 9) % 3 === 0;
     parts.lids = [];
     [-1, 1].forEach((sd, i) => {
-      const dir = new THREE.Vector3(sd * 0.44, 0.3, -0.85).normalize();
-      const eg = new THREE.Group(); eg.position.copy(dir).multiplyScalar(0.118);
+      const dir = new THREE.Vector3(sd * 0.42, 0.2, -0.885).normalize();
+      const eg = new THREE.Group(); eg.position.copy(dir).multiplyScalar(0.125);
       eg.lookAt(eg.position.clone().add(dir)); head.add(eg);
       if (patch && i === 0) {
-        const p = mk(new THREE.CylinderGeometry(0.04, 0.04, 0.012, 20), mDark, false, false); p.rotation.x = Math.PI / 2; p.position.z = 0.02; eg.add(p);
-        const strap = mk(new THREE.TorusGeometry(0.143, 0.005, 4, 40), mDark, false, false); strap.rotation.set(0.35, 0.1, sd * -0.5); strap.position.y = 0.02; head.add(strap);
+        // Augenklappe: liegt wie das Auge auf dem Kopf, Band diagonal um den Kopf
+        const p = mk(new THREE.SphereGeometry(0.043, 16, 10), mDark, false, false); p.scale.set(1.08, 1.2, 0.72); eg.add(p);
+        const strap = mk(new THREE.TorusGeometry(0.146, 0.0045, 5, 48), mDark, false, false);
+        strap.rotation.set(Math.PI / 2 + 0.25, 0, sd * 0.55); strap.position.y = 0.022; head.add(strap);
         return;
       }
-      const eye = mk(new THREE.SphereGeometry(0.043, 14, 10), mWhite, false, false); eye.scale.set(1, 1.15, 0.8); eg.add(eye);
-      const pupil = mk(new THREE.SphereGeometry(0.022, 14, 10), mPupil, false, false); pupil.position.set(-sd * 0.004, -0.002, 0.029); pupil.scale.set(1, 1.2, 0.6); eg.add(pupil);
-      const shine = new THREE.Mesh(new THREE.SphereGeometry(0.0065, 8, 6), mShine); shine.position.set(-sd * 0.009 + 0.004, 0.012, 0.042); eg.add(shine);
-      // Lid: Kugelkappe im Kopfgefieder, dreht von oben über das Auge
-      const lid = mk(new THREE.SphereGeometry(0.047, 18, 10, 0, Math.PI * 2, 0, Math.PI * 0.55), mHead, false, false);
-      lid.scale.set(1, 1.15, 0.85);
-      const lidPivot = new THREE.Group(); lidPivot.add(lid); lidPivot.rotation.x = -0.65; eg.add(lidPivot);
-      parts.lids.push({ pivot: lidPivot, open: -0.65 - (i ? 0 : 0), closed: 0.55 });
-      // Augenbraue (verschmitzt schräg)
-      const brow = mk(taperCapsule(0.009, 0.006, 0.07, 6), new THREE.MeshStandardMaterial({ color: new THREE.Color(pl[1]).multiplyScalar(0.55), roughness: 0.8 }), false, false);
-      brow.rotation.set(0, 0, Math.PI / 2 + sd * 0.25); brow.position.set(0, 0.052, 0.02); eg.add(brow);
+      const eye = mk(new THREE.SphereGeometry(0.04, 16, 12), mWhite, false, false); eye.scale.set(1, 1.15, 0.7); eg.add(eye);
+      const pupil = mk(new THREE.SphereGeometry(0.018, 14, 10), mPupil, false, false); pupil.position.set(-sd * 0.003, -0.002, 0.021); pupil.scale.set(1, 1.2, 0.5); eg.add(pupil);
+      const shine = new THREE.Mesh(new THREE.SphereGeometry(0.0055, 8, 6), mShine); shine.position.set(-sd * 0.007 + 0.004, 0.01, 0.027); eg.add(shine);
+      const lid = mk(new THREE.SphereGeometry(0.0405, 20, 10, 0, Math.PI * 2, 0, Math.PI * 0.5), mHead, false, false);
+      lid.scale.set(1.04, 1.2, 0.76);
+      const lidPivot = new THREE.Group(); lidPivot.add(lid); eg.add(lidPivot);
+      const L = { pivot: lidPivot, open: -1.5, closed: 1.52 };
+      lidPivot.rotation.x = L.open;
+      parts.lids.push(L);
+      // Augenbraue (verschmitzt schräg), liegt knapp über dem Auge auf dem Kopf
+      const brow = mk(taperCapsule(0.008, 0.006, 0.062, 6), mBrow, false, false);
+      brow.rotation.set(0, 0, Math.PI / 2 + sd * 0.22); brow.position.set(0, 0.057, -0.004); eg.add(brow);
     });
 
-    // Kopfbedeckung
+    // Kopfbedeckung (sitzt oberhalb der Augenbrauen)
     const hatType = (hash >>> 15) % 3;
     if (hatType < 2) {
       const hatMat = cloth(0x1d1814);
-      const hat = new THREE.Group(); hat.position.set(0, 0.095, 0.005); hat.rotation.x = -0.1; head.add(hat); parts.hat = hat;
-      const tc = tricornGeometry(0.1, 0.225, 0.1);
+      const hat = new THREE.Group(); hat.position.set(0, 0.1, 0.008); hat.rotation.x = -0.12; head.add(hat); parts.hat = hat;
+      const tc = tricornGeometry(0.098, 0.205, 0.085);
       const brim = mk(tc.geo, hatMat.clone()); brim.material.side = THREE.DoubleSide; hat.add(brim);
-      const crown = mk(lathe([[0.122, 0], [0.12, 0.04], [0.11, 0.08], [0.085, 0.11], [0.045, 0.125], [0, 0.128]], 28), hatMat);
+      const crown = mk(lathe([[0.118, 0], [0.117, 0.04], [0.108, 0.078], [0.083, 0.105], [0.044, 0.12], [0, 0.123]], 28), hatMat);
       crown.scale.set(1, 1, 1.05); hat.add(crown);
       const edge = []; for (let k = 0; k < 96; k++) edge.push(tc.edge((k / 96) * Math.PI * 2));
-      hat.add(mk(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(edge, true), 200, 0.006, 5, true), mGold, false, false));
-      const band = mk(new THREE.TorusGeometry(0.121, 0.008, 5, 32), mGold, false, false); band.rotation.x = Math.PI / 2; band.position.y = 0.012; hat.add(band);
-      const emblem = new THREE.Mesh(new THREE.PlaneGeometry(0.075, 0.075), new THREE.MeshBasicMaterial({ map: h.skullTexture(), transparent: true, depthWrite: false }));
-      emblem.position.set(0, 0.06, -0.126); emblem.rotation.set(-0.12, Math.PI, 0); hat.add(emblem);
+      hat.add(mk(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(edge, true), 160, 0.0048, 5, true), mGold, false, false));
+      const band = mk(new THREE.TorusGeometry(0.118, 0.0075, 5, 32), mGold, false, false); band.rotation.x = Math.PI / 2; band.position.y = 0.012; band.scale.set(1, 1.05, 1); hat.add(band);
+      const emblem = new THREE.Mesh(new THREE.PlaneGeometry(0.07, 0.07), new THREE.MeshBasicMaterial({ map: h.skullTexture(), transparent: true, depthWrite: false }));
+      emblem.position.set(0, 0.058, -0.126); emblem.rotation.set(-0.1, Math.PI, 0); hat.add(emblem);
       if (hatType === 0) {
         if (!featherTex) featherTex = featherTexture();
-        const fg = new THREE.PlaneGeometry(0.07, 0.34, 1, 10);
+        const fg = new THREE.PlaneGeometry(0.065, 0.3, 1, 10);
         const fp = fg.attributes.position;
-        for (let k = 0; k < fp.count; k++) { const y = fp.getY(k) + 0.17; fp.setZ(k, y * y * 1.1); }
+        for (let k = 0; k < fp.count; k++) { const y = fp.getY(k) + 0.15; fp.setZ(k, y * y * 1.1); }
         fg.computeVertexNormals();
         const plume = new THREE.Mesh(fg, new THREE.MeshStandardMaterial({ map: featherTex, color: [0xc0392b, 0xf2efe6, 0x2a6ab0][hash % 3], alphaTest: 0.4, side: THREE.DoubleSide, roughness: 0.9 }));
         plume.castShadow = true;
-        plume.position.set(0.1, 0.17, 0.07); plume.rotation.set(-0.5, 0.4, -0.55); hat.add(plume);
+        plume.position.set(0.095, 0.15, 0.06); plume.rotation.set(-0.5, 0.4, -0.55); hat.add(plume);
       }
     } else {
+      // Kopftuch: vorne oberhalb der Augenbrauen, hinten bis zum Nacken, Knoten hinten
       const bandMat = new THREE.MeshPhysicalMaterial({ map: h.dotTexture(SCARVES[(hash >>> 18) % SCARVES.length]), roughness: 0.85, sheen: 0.8, sheenRoughness: 0.5 });
-      const cap = mk(new THREE.SphereGeometry(0.146, 28, 14, 0, Math.PI * 2, 0, Math.PI * 0.46), bandMat);
-      cap.rotation.x = 0.18; cap.position.y = 0.004; head.add(cap);
-      const knot2 = mk(new THREE.SphereGeometry(0.032, 10, 8), bandMat); knot2.position.set(0, 0.03, 0.145); head.add(knot2);
+      const cap = mk(new THREE.SphereGeometry(0.147, 30, 14, 0, Math.PI * 2, 0, Math.PI * 0.4), bandMat);
+      cap.scale.set(1, 0.97, 1.07); cap.rotation.x = 0.4; cap.position.y = 0.006; head.add(cap);
+      const hem = mk(new THREE.TorusGeometry(0.147 * Math.sin(Math.PI * 0.4), 0.007, 6, 40), bandMat);
+      hem.rotation.x = Math.PI / 2; hem.position.y = 0.147 * Math.cos(Math.PI * 0.4);
+      const hemG = new THREE.Group(); hemG.add(hem); hemG.scale.set(1, 0.97, 1.07); hemG.rotation.x = 0.4; hemG.position.y = 0.006; head.add(hemG);
+      const knot2 = mk(new THREE.SphereGeometry(0.03, 10, 8), bandMat); knot2.position.set(0, 0.04, 0.15); head.add(knot2);
       [-1, 1].forEach((sd) => {
-        const tl = mk(lathe([[0, 0], [0.026, 0.02], [0.024, 0.08], [0.004, 0.13]], 8), bandMat);
-        tl.scale.set(1, 1, 0.35); tl.position.set(sd * 0.02, 0.02, 0.16); tl.rotation.set(Math.PI - 0.5, 0, sd * 0.35); head.add(tl);
+        const tl = mk(lathe([[0, 0], [0.024, 0.02], [0.022, 0.075], [0.004, 0.12]], 8), bandMat);
+        tl.scale.set(1, 1, 0.35); tl.position.set(sd * 0.018, 0.03, 0.16); tl.rotation.set(Math.PI - 0.45, 0, sd * 0.35); head.add(tl);
       });
     }
   }
@@ -298,7 +311,7 @@ export function buildDuck(id, isMe, h) {
   // Flügel: Ärmel (Oberarm), Federflügel (Unterarm), Spitzenmanschette, gefächerte Federspitze
   const L1 = isMe ? 0.3 : 0.22, L2 = isMe ? 0.3 : 0.22;
   const upperGeo = taperCapsule(0.052, 0.045, L1, 12);
-  const foreGeo = taperCapsule(0.046, 0.038, L2, 12);
+  const foreGeo = taperCapsule(0.042, 0.05, L2, 12); // Ärmel wird zum Aufschlag hin weiter
   // breiter Ärmelaufschlag am Handgelenk
   const cuffGeo = lathe([[0.04, -0.03], [0.056, -0.028], [0.06, 0.0], [0.056, 0.022], [0.042, 0.024]], 16);
   const cuffTrimGeo = new THREE.TorusGeometry(0.058, 0.006, 5, 20); cuffTrimGeo.rotateX(Math.PI / 2); cuffTrimGeo.translate(0, 0.022, 0);

@@ -4,9 +4,9 @@ Das Würfel-Bluffspiel aus **Fluch der Karibik – Die Truhe des Todes** zum Spi
 
 ## Funktionen
 
-- **Ich-Perspektive in 3D** (Three.js): Du sitzt selbst am Tisch auf einer einsamen Pirateninsel – Sandstrand, Palmen, Fackeln, Schatztruhe, Meer mit Wellen und ein schwarzes Schiff am Horizont, Sonnenuntergang.
+- **Ich-Perspektive in 3D** (Three.js): Du sitzt selbst am Tisch auf einer einsamen Pirateninsel – Palmen (eine mit Hängematte), Fackeln, Lagerfeuer, Piratenflagge, Kanone, Schatztruhen mit Goldhaufen, Anker, Ruderboot, Papagei, Krabbe, Möwen, Meer mit Wellen, Sonnenuntergang und Schiffe am Horizont (eins segelt langsam vorbei).
 - **Der Tisch wächst mit der Crew**: 2–8 Spieler, Tischgröße und Anzahl der Plätze passen sich automatisch an.
-- **Echte Figuren** (Dreispitz oder Kopftuch, Bärte, Augenklappen …) sitzen am Tisch, halten ihren Becher, drehen den Kopf zur Person, die gerade dran ist, und hauen bei „Lügner!“ auf den Tisch.
+- **Enten in Piratenkostümen** (Mantel, Gürtel, Dreispitz mit Totenkopf oder Kopftuch, manchmal Augenklappe) sitzen am Tisch, halten ihren Becher mit dem Flügel, drehen den Kopf zur Person, die gerade dran ist, und hauen bei „Lügner!“ auf den Tisch. Über den Köpfen steht nur der Name.
 - **Becher schütteln & umdrehen**: Zu Beginn jeder Runde nehmen alle ihren Becher, schütteln ihn und knallen ihn umgedreht auf den Tisch. Beim Aufdecken kippen alle ihre Becher um – die passenden Würfel leuchten.
 - **Unter den Becher schauen**: Knopf, Leertaste oder Klick auf den eigenen Becher – du hebst den Becher nur leicht an, so dass *du* die Würfel siehst. Alle anderen sehen live, dass du nachschaust (der Becher kippt an deinem Platz an, die Figur senkt den Kopf).
 - **Umsehen**: mit Maus/Finger ziehen; die Blickrichtung wird an die anderen übertragen (deine Figur dreht den Kopf mit).

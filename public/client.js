@@ -402,7 +402,7 @@
         crewFreeze = { until: Date.now() + (b3 && mode3d ? rt0.banner - 300 : 1500), counts, total: prevStateForFreeze.totalDice };
         setTimeout(() => { if (latestState) { renderCrew(latestState); renderGame(latestState); } }, crewFreeze.until - Date.now() + 30);
       }
-      if (ev.t === 'reveal') { const rt = revealTiming(ev.actual); revealBannerAt = Date.now() + (b3 && mode3d ? rt.banner : 1500); resultAt = Date.now() + (b3 && mode3d ? rt.banner + 2600 : 4800); }
+      if (ev.t === 'reveal') { const rt = revealTiming(ev.actual); revealBannerAt = Date.now() + (b3 && mode3d ? rt.banner : 1500); resultAt = Date.now() + (b3 && mode3d ? rt.banner + 4200 : 4800); }
       if (!b3 || !mode3d) {
         // ohne 3D die Töne hier abspielen
         if (ev.t === 'roll') { for (let i = 0; i < 6; i++) setTimeout(() => sound('rattle', 0.8), i * 110); setTimeout(() => sound('slam'), 800); }
@@ -429,6 +429,8 @@
     const expect = (fresh || []).some((e) => e.t === 'roll' || e.t === 'reveal');
     sync3d(expect);
     if (b3 && mode3d && fresh && fresh.length) b3.events(fresh);
+    // Spielstart: kurzer Kameraflug über die Insel (Klick oder Taste überspringt)
+    if (b3 && mode3d && b3.playIntro && state.roundNo === 1 && (fresh || []).some((e) => e.t === 'roll')) b3.playIntro();
     renderGame(state);
   }
 
@@ -806,6 +808,7 @@
     actions.appendChild(el('button', { class: 'btn ghost', text: 'Tisch ansehen', onclick: () => { dismissedResult = key; hide(modal); } }));
     actions.appendChild(el('button', { class: 'btn ghost', text: 'Verlassen', onclick: leave }));
     body.appendChild(actions);
+    hide($('banner')); // Aufdeck-Zusammenfassung macht der Schriftrolle Platz
     show(modal);
   }
 

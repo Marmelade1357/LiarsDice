@@ -369,9 +369,10 @@ export function buildDuck(id, isMe, h, avatar) {
     const mWhite = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.3 });
     const mPupil = new THREE.MeshStandardMaterial({ color: 0x0b0b0b, roughness: 0.15 });
     const mShine = new THREE.MeshBasicMaterial({ color: 0xffffff });
-    const mBrow = new THREE.MeshStandardMaterial({ color: new THREE.Color(pl[1]).multiplyScalar(0.5), roughness: 0.85 });
+    const mBrow = new THREE.MeshStandardMaterial({ color: new THREE.Color(pl[1]).multiplyScalar(0.3), roughness: 0.85 });
     const patch = !!av.patch;
     parts.lids = [];
+    parts.brows = [];
     [-1, 1].forEach((sd, i) => {
       const dir = new THREE.Vector3(sd * 0.42, 0.2, -0.885).normalize();
       const eg = new THREE.Group(); eg.position.copy(dir).multiplyScalar(0.125);
@@ -403,8 +404,9 @@ export function buildDuck(id, isMe, h, avatar) {
       lidPivot.rotation.x = L.open;
       parts.lids.push(L);
       // Augenbraue (verschmitzt schräg), liegt knapp über dem Auge auf dem Kopf
-      const brow = mk(taperCapsule(0.008, 0.006, 0.062, 6), mBrow, false, false);
-      brow.rotation.set(0, 0, Math.PI / 2 + sd * 0.22); brow.position.set(0, 0.057, -0.004); eg.add(brow);
+      const brow = mk(taperCapsule(0.0095, 0.007, 0.068, 6), mBrow, false, false);
+      brow.rotation.set(0, 0, Math.PI / 2 + sd * 0.18); brow.position.set(0, 0.058, 0.004); eg.add(brow);
+      parts.brows.push({ m: brow, sd, y0: 0.058, z0: brow.rotation.z, lift: 0, tilt: 0 });
     });
 
     // Kopfbedeckung (sitzt oberhalb der Augenbrauen)

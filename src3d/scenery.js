@@ -79,7 +79,7 @@ function trunkTexture() {
 
 function frondGeometry(L, elev, r, dead) {
   const leaves = [];
-  const pos = [], col = [], idx = [];
+  const pos = [], col = [], idx = [], uvs = [];
   const c = new THREE.Color();
   // Blattspindel (Rachis) in der x-y-Ebene, zeigt nach +x
   const pt = (u) => new THREE.Vector3(Math.cos(elev) * L * u, Math.sin(elev) * L * u - (Math.sin(elev) + (dead ? 0.9 : 0.42)) * L * u * u, 0);
@@ -88,49 +88,84 @@ function frondGeometry(L, elev, r, dead) {
   const baseCol = dead ? new THREE.Color(0x8a6a3a) : new THREE.Color().setHSL(0.25 + r() * 0.04, 0.55, 0.3 + r() * 0.06);
   const tipCol = dead ? new THREE.Color(0xb08a50) : new THREE.Color().setHSL(0.2 + r() * 0.03, 0.6, 0.45);
   leaves.push(taperedTube(curve, 20, 5, (t) => 0.028 * (1 - t) + 0.004, (cc, t) => cc.copy(baseCol).lerp(tipCol, t * 0.6)));
-  const N = dead ? 16 : 34;
+  // Blättchen als texturierte, hängende Bänder links und rechts der Spindel (Textur mit Alpha statt
+  // hunderter dünner Streifen: ruhiger, kein Flimmern, weiche Blattformen)
+  const M = 26;
   let vi = 0;
-  for (let k = 0; k < N; k++) {
-    const u = 0.1 + (k / (N - 1)) * 0.88;
-    const P = curve.getPointAt(u);
-    const T = curve.getTangentAt(u);
-    const len = L * 0.42 * Math.pow(Math.sin(Math.PI * Math.min(1, u * 1.05)), 0.55) * (1 - 0.25 * u);
-    for (const sd of [1, -1]) {
-      // Blättchen: seitlich, leicht nach vorn und nach unten hängend
+  for (const sd of [1, -1]) {
+    for (let k = 0; k <= M; k++) {
+      const u = 0.07 + (k / M) * 0.91;
+      const P = curve.getPointAt(u);
+      const T = curve.getTangentAt(u);
+      const len = L * 0.42 * Math.pow(Math.sin(Math.PI * Math.min(1, u * 1.05)), 0.55) * (1 - 0.25 * u) + 0.02;
       const side = new THREE.Vector3(0, 0, sd);
-      const dir = side.clone().multiplyScalar(Math.cos(0.55)).addScaledVector(T, Math.sin(0.55)).add(new THREE.Vector3(0, -(dead ? 0.9 : 0.35 + 0.25 * u), 0)).normalize();
-      const up = new THREE.Vector3().crossVectors(dir, T).normalize();
-      const w = 0.04 * (dead ? 0.6 : 1);
-      const segN = 3;
-      for (let s = 0; s <= segN; s++) {
-        const f = s / segN;
-        const center = P.clone().addScaledVector(dir, len * f).addScaledVector(new THREE.Vector3(0, -1, 0), len * f * f * 0.25);
-        const ww = w * Math.sin(Math.PI * Math.min(0.95, f * 0.9 + 0.1));
-        const a = center.clone().addScaledVector(T, ww), b = center.clone().addScaledVector(T, -ww);
-        pos.push(a.x, a.y, a.z, b.x, b.y, b.z);
-        c.copy(baseCol).lerp(tipCol, 0.3 + f * 0.7 * (0.6 + 0.4 * u));
-        const shade = 0.85 + r() * 0.3;
-        col.push(c.r * shade, c.g * shade, c.b * shade, c.r * shade, c.g * shade, c.b * shade);
+      const dir = side.clone().multiplyScalar(Math.cos(0.5)).addScaledVector(T, Math.sin(0.5)).add(new THREE.Vector3(0, -(dead ? 0.9 : 0.3 + 0.3 * u), 0)).normalize();
+      for (let j = 0; j <= 2; j++) {
+        const f = j / 2;
+        const p3 = P.clone().addScaledVector(dir, len * f).addScaledVector(new THREE.Vector3(0, -1, 0), len * f * f * 0.3);
+        pos.push(p3.x, p3.y, p3.z);
+        uvs.push(k / M, f);
+        c.copy(baseCol).lerp(tipCol, 0.25 + f * 0.55 * (0.6 + 0.4 * u) + u * 0.2);
+        const shade = 0.9 + r() * 0.2;
+        col.push(c.r * shade, c.g * shade, c.b * shade);
       }
-      for (let s = 0; s < segN; s++) { const o = vi + s * 2; idx.push(o, o + 1, o + 2, o + 1, o + 3, o + 2); }
-      vi += (segN + 1) * 2;
     }
+    for (let k = 0; k < M; k++) for (let j = 0; j < 2; j++) {
+      const a0 = vi + k * 3 + j, b0 = a0 + 3;
+      idx.push(a0, b0, a0 + 1, b0, b0 + 1, a0 + 1);
+    }
+    vi += (M + 1) * 3;
   }
   const lg = new THREE.BufferGeometry();
   lg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   lg.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  lg.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
   lg.setIndex(idx);
   lg.computeVertexNormals();
-  leaves.push(lg);
-  return merge(leaves);
+  // Spindel bekommt UVs auf den deckenden Streifen am unteren Texturrand -> ein Mesh, ein Material
+  const rach = clean(leaves[0]);
+  const ru = rach.attributes.uv; for (let i = 0; i < ru.count; i++) ru.setXY(i, 0.5, 0.012);
+  return mergeGeometries([rach, clean(lg)]);
 }
+
+// Blattmuster: schräge, spitz zulaufende Fiederblättchen (hell, die Farbe kommt aus den Vertex-Farben)
+let leafTex = null;
+function leafTexture() {
+  if (leafTex) return leafTex;
+  const W = 1024, H = 128;
+  const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+  const c = cv.getContext('2d');
+  c.clearRect(0, 0, W, H);
+  c.fillStyle = 'rgb(215,210,170)'; c.fillRect(0, H - 5, W, 5); // deckender Streifen für die Spindel
+  const n = 58;
+  for (let i = 0; i < n; i++) {
+    const x0 = 4 + (i / n) * (W - 8) + Math.sin(i * 7.1) * 3;
+    const lean = 30 + Math.sin(i * 3.3) * 8;
+    const w = 17 + Math.sin(i * 1.7) * 3;
+    const tipY = 3 + Math.abs(Math.sin(i * 2.9)) * 14;   // ungleich lange Blättchen
+    const g = c.createLinearGradient(0, H, 0, tipY);
+    const l = 225 + Math.sin(i * 5.3) * 20;
+    g.addColorStop(0, `rgb(${l - 45},${l - 35},${l - 50})`); g.addColorStop(0.45, `rgb(${l},${l},${l - 12})`); g.addColorStop(1, `rgb(${l - 15},${l - 8},${l - 30})`);
+    c.fillStyle = g;
+    c.beginPath();
+    c.moveTo(x0 - w * 0.5, H);
+    c.quadraticCurveTo(x0 + lean * 0.3 - w, H * 0.45, x0 + lean, tipY);
+    c.quadraticCurveTo(x0 + lean * 0.3 + w, H * 0.45, x0 + w * 0.5, H);
+    c.closePath(); c.fill();
+    c.strokeStyle = 'rgba(255,255,235,0.3)'; c.lineWidth = 1.4;
+    c.beginPath(); c.moveTo(x0, H); c.quadraticCurveTo(x0 + lean * 0.3, H * 0.45, x0 + lean, tipY + 2); c.stroke();
+  }
+  const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8;
+  leafTex = t; return t;
+}
+
 
 let frondMat = null, trunkMat = null, nutMat = null;
 export function buildPalm(x, z, height, leanX, leanZ, seed) {
   const r = rng(seed * 7919 + 13);
   if (!frondMat) {
-    frondMat = new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide, roughness: 0.75 });
-    trunkMat = new THREE.MeshStandardMaterial({ map: trunkTexture(), vertexColors: true, roughness: 0.95 });
+    frondMat = new THREE.MeshStandardMaterial({ vertexColors: true, map: leafTexture(), alphaTest: 0.4, alphaToCoverage: true, side: THREE.DoubleSide, roughness: 0.72 });
+    trunkMat = new THREE.MeshStandardMaterial({ map: trunkTexture(), vertexColors: true, roughness: 0.95, emissive: 0x24180e, emissiveIntensity: 1 });
     nutMat = new THREE.MeshStandardMaterial({ color: 0x5a3f22, roughness: 0.6 });
   }
   const g = new THREE.Group();
